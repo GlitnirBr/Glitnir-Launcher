@@ -4,8 +4,9 @@
   justify-content: space-between;
   height: var(--titlebar-height);
   min-height: var(--titlebar-height);
-  background: rgba(10, 22, 40, 0.9);
+  background: rgba(10, 40, 70, 0.8);
   border-bottom: 1px solid var(--border-color);
+  backdrop-filter: blur(15px);
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -23,24 +24,25 @@
 .titlebar-user {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 12px;
+  gap: 10px;
+  padding: 0 16px;
 }
 
 .admin-badge {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 3px 8px;
-  background: rgba(77, 217, 255, 0.2);
-  color: var(--accent-cyan);
-  border: 1px solid rgba(77, 217, 255, 0.3);
-  border-radius: var(--radius-sm);
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-cyan-dark) 100%);
+  color: #003344;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(94, 232, 255, 0.3);
 }
 
 .user-name {
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-secondary);
 }
 
@@ -48,8 +50,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   background: transparent;
   border: none;
@@ -59,13 +61,13 @@
 }
 
 .btn-admin svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   color: var(--text-muted);
 }
 
 .btn-admin:hover {
-  background: rgba(77, 217, 255, 0.15);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .btn-admin:hover svg {
@@ -80,7 +82,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
+  width: 50px;
   height: var(--titlebar-height);
   padding: 0;
   background: transparent;
@@ -90,13 +92,13 @@
 }
 
 .control-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
   color: var(--text-muted);
 }
 
 .control-btn:hover {
-  background: rgba(77, 217, 255, 0.15);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .control-btn:hover svg {
@@ -104,7 +106,7 @@
 }
 
 .control-btn.close:hover {
-  background: #c42b1c;
+  background: #e04050;
 }
 
 .control-btn.close:hover svg {

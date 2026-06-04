@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Layout from './components/Layout/Layout'
 import AdminLoginModal from './components/Admin/AdminLoginModal'
+import UpdateNotification from './components/UpdateNotification/UpdateNotification'
 import { HomeView, ModsView, SettingsView, AdminView } from './views'
 import { fetchModpack, checkOutdated } from './utils/modManager'
 import { Config, Modpack, Mod } from './types'
@@ -285,6 +286,8 @@ export default function App() {
           onClose={() => setShowAdminModal(false)}
         />
       )}
+
+      <UpdateNotification />
     </>
   )
 }

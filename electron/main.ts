@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -68,7 +69,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     frame: false,
-    backgroundColor: '#0a1628',
+    backgroundColor: '#3d8ab8',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -86,6 +87,35 @@ function createWindow() {
 
 app.whenReady().then(() => {
   const win = createWindow()
+
+  // Auto-updater setup
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('update-available', () => {
+    win.webContents.send('updater:status', { status: 'available' })
+  })
+
+  autoUpdater.on('update-downloaded', () => {
+    win.webContents.send('updater:status', { status: 'downloaded' })
+  })
+
+  autoUpdater.on('error', (err) => {
+    console.error('Auto-updater error:', err)
+  })
+
+  // Check for updates after 3 seconds
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(() => {})
+  }, 3000)
+
+  ipcMain.handle('updater:check', () => {
+    autoUpdater.checkForUpdates().catch(() => {})
+  })
+
+  ipcMain.handle('updater:install', () => {
+    autoUpdater.quitAndInstall()
+  })
 
   ipcMain.on('window:minimize', () => win.minimize())
   ipcMain.on('window:maximize', () => win.isMaximized() ? win.unmaximize() : win.maximize())

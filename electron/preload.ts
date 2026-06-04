@@ -37,4 +37,12 @@ contextBridge.exposeInMainWorld('glitnir', {
   shell: {
     openExternal: (url: string) => ipcRenderer.send('shell:openExternal', url),
   },
+
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    onStatus: (callback: (data: { status: string }) => void) => {
+      ipcRenderer.on('updater:status', (_e, data) => callback(data))
+    },
+  },
 })

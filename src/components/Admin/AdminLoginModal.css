@@ -1,33 +1,33 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(10, 22, 40, 0.9);
+  background: rgba(10, 50, 80, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 200;
-  backdrop-filter: blur(5px);
+  backdrop-filter: blur(8px);
 }
 
 .modal-box {
-  background: linear-gradient(180deg, rgba(15, 40, 70, 0.95) 0%, rgba(10, 30, 55, 0.95) 100%);
-  border: 1px solid var(--border-color);
+  background: linear-gradient(180deg, rgba(20, 70, 110, 0.95) 0%, rgba(15, 55, 90, 0.95) 100%);
+  border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
-  padding: 28px 32px;
-  width: 360px;
+  padding: 32px 36px;
+  width: 380px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   box-shadow: var(--shadow-lg), var(--shadow-glow);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(20px);
 }
 
 .modal-box h3 {
   color: var(--accent-cyan);
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   margin: 0;
-  text-shadow: 0 0 10px rgba(77, 217, 255, 0.3);
+  text-shadow: 0 0 15px rgba(94, 232, 255, 0.4);
 }
 
 .modal-box p {
@@ -39,8 +39,8 @@
 .modal-box form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 8px;
+  gap: 14px;
+  margin-top: 10px;
 }
 
 .modal-box input {
@@ -55,15 +55,15 @@
 
 .modal-actions {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   justify-content: flex-end;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .btn-cancel {
-  padding: 10px 20px;
+  padding: 12px 24px;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-secondary);
   background: transparent;
   border: 1px solid var(--border-color);
@@ -75,15 +75,15 @@
 .btn-cancel:hover {
   color: var(--text-primary);
   border-color: var(--border-light);
-  background: rgba(77, 217, 255, 0.1);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .btn-confirm {
-  padding: 10px 20px;
+  padding: 12px 24px;
   font-size: 14px;
-  font-weight: 600;
-  color: #0a1628;
-  background: linear-gradient(180deg, var(--accent-cyan) 0%, var(--accent-cyan-dark) 100%);
+  font-weight: 700;
+  color: #003344;
+  background: linear-gradient(180deg, #7af4ff 0%, var(--accent-cyan) 100%);
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -92,7 +92,7 @@
 }
 
 .btn-confirm:hover:not(:disabled) {
-  background: linear-gradient(180deg, var(--accent-cyan-hover) 0%, var(--accent-cyan) 100%);
+  background: linear-gradient(180deg, #a0f8ff 0%, var(--accent-cyan-hover) 100%);
 }
 
 .btn-confirm:disabled {

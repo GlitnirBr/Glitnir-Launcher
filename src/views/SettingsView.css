@@ -1,13 +1,13 @@
 .settings-view {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  max-width: 700px;
+  gap: 28px;
+  max-width: 750px;
 }
 
 .settings-header h1 {
-  font-size: 24px;
-  margin: 0 0 4px;
+  font-size: 26px;
+  margin: 0 0 6px;
 }
 
 .settings-section .card-header h3 {
@@ -17,12 +17,13 @@
 .setting-description {
   font-size: 14px;
   color: var(--text-secondary);
-  margin: 0 0 16px;
+  margin: 0 0 18px;
+  line-height: 1.5;
 }
 
 .path-input-group {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 
 .path-input {

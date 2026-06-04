@@ -65,6 +65,11 @@ declare global {
       shell: {
         openExternal: (url: string) => void
       }
+      updater: {
+        check: () => Promise<void>
+        install: () => Promise<void>
+        onStatus: (callback: (data: { status: string }) => void) => void
+      }
     }
   }
 }

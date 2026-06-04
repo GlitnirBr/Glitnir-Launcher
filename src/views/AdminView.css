@@ -1,13 +1,13 @@
 .admin-view {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  max-width: 700px;
+  gap: 28px;
+  max-width: 750px;
 }
 
 .admin-header h1 {
-  font-size: 24px;
-  margin: 0 0 4px;
+  font-size: 26px;
+  margin: 0 0 6px;
 }
 
 .admin-section .card-header h3 {
@@ -15,7 +15,7 @@
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .form-group:last-child {
@@ -25,9 +25,11 @@
 .form-group label {
   display: block;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .form-group input {
@@ -38,13 +40,14 @@
   display: block;
   font-size: 12px;
   color: var(--text-muted);
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .info-row {
   display: flex;
   justify-content: space-between;
-  padding: 10px 0;
+  align-items: center;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border-color);
 }
 

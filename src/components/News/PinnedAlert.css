@@ -1,11 +1,13 @@
 .pinned-alert {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  background: rgba(255, 193, 7, 0.1);
-  border: 1px solid rgba(255, 193, 7, 0.25);
+  gap: 14px;
+  padding: 14px 18px;
+  background: rgba(255, 208, 102, 0.15);
+  border: 1px solid rgba(255, 208, 102, 0.35);
   border-radius: var(--radius-md);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 20px rgba(255, 208, 102, 0.1);
 }
 
 .pinned-alert-icon {
@@ -13,16 +15,17 @@
 }
 
 .pinned-alert-icon svg {
-  width: 20px;
-  height: 20px;
-  color: var(--accent-yellow);
+  width: 22px;
+  height: 22px;
+  color: var(--accent-gold);
+  filter: drop-shadow(0 0 8px rgba(255, 208, 102, 0.4));
 }
 
 .pinned-alert-content {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .pinned-alert-title {
@@ -32,7 +35,7 @@
 }
 
 .pinned-alert-meta {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 
@@ -41,8 +44,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
   background: transparent;
   border: none;
@@ -52,8 +55,8 @@
 }
 
 .pinned-alert-dismiss svg {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   color: var(--text-muted);
 }
 

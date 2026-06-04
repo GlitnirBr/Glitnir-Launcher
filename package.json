@@ -15,17 +15,27 @@
       "target": "nsis",
       "icon": "src/assets/icon.ico"
     },
+    "nsis": {
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false
+    },
     "files": [
       "dist/**/*",
       "dist-electron/**/*"
     ],
     "directories": {
       "output": "release"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "luizgseixas",
+      "repo": "Glitnir-Launcher"
     }
   },
   "dependencies": {
     "adm-zip": "^0.5.10",
     "axios": "^1.6.0",
+    "electron-updater": "^6.1.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
