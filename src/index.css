@@ -1,15 +1,15 @@
 :root {
-  /* Battle.net inspired dark theme */
-  --bg-primary: #0d0f14;
-  --bg-secondary: #141820;
-  --bg-tertiary: #1a1f2a;
-  --bg-sidebar: #0a0c10;
-  --bg-card: #1a1f2a;
-  --bg-card-hover: #222833;
+  /* Battle.net inspired dark theme - adjusted for visibility */
+  --bg-primary: #1a1d24;
+  --bg-secondary: #22262f;
+  --bg-tertiary: #2a303c;
+  --bg-sidebar: #141720;
+  --bg-card: #252a35;
+  --bg-card-hover: #2e3442;
 
-  --text-primary: #ffffff;
-  --text-secondary: #8e9297;
-  --text-muted: #5c6370;
+  --text-primary: #f0f0f0;
+  --text-secondary: #a8adb5;
+  --text-muted: #6b7280;
 
   --accent-blue: #00aeff;
   --accent-blue-hover: #33c1ff;
@@ -19,8 +19,8 @@
   --accent-red: #ff4757;
   --accent-purple: #8b5cf6;
 
-  --border-color: #2a2f3a;
-  --border-light: #363c4a;
+  --border-color: #3a4050;
+  --border-light: #4a5060;
 
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
