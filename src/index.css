@@ -50,7 +50,7 @@ body {
   font-size: 14px;
   line-height: 1.5;
   color: var(--text-primary);
-  background: var(--bg-primary);
+  background: linear-gradient(135deg, #0a1628 0%, #0d2040 50%, #1a3a5c 100%);
   overflow: hidden;
   user-select: none;
 }
