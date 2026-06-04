@@ -1,13 +1,47 @@
 .admin-view {
   display: flex;
   flex-direction: column;
-  gap: 28px;
-  max-width: 750px;
+  gap: 24px;
+  max-width: 850px;
 }
 
 .admin-header h1 {
   font-size: 26px;
   margin: 0 0 6px;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(15px);
+}
+
+.admin-tab {
+  flex: 1;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.admin-tab:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.admin-tab.active {
+  color: #003344;
+  background: linear-gradient(180deg, var(--accent-cyan) 0%, var(--accent-cyan-dark) 100%);
+  box-shadow: 0 2px 10px rgba(94, 232, 255, 0.3);
 }
 
 .admin-section .card-header h3 {
@@ -32,8 +66,28 @@
   letter-spacing: 0.05em;
 }
 
-.form-group input {
+.form-group input,
+.form-group textarea {
   width: 100%;
+}
+
+.form-group textarea {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  padding: 12px 16px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  outline: none;
+  backdrop-filter: blur(10px);
+  resize: vertical;
+  min-height: 100px;
+}
+
+.form-group textarea:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 15px rgba(94, 232, 255, 0.3);
 }
 
 .form-hint {
@@ -69,4 +123,112 @@
 .admin-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.error-banner {
+  padding: 14px 18px;
+  background: rgba(255, 112, 128, 0.15);
+  border: 1px solid rgba(255, 112, 128, 0.35);
+  border-radius: var(--radius-md);
+  color: var(--accent-red);
+  font-size: 14px;
+  backdrop-filter: blur(10px);
+}
+
+/* Search styles */
+.search-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.search-row input {
+  flex: 1;
+}
+
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.search-result-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.result-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.result-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.result-owner {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.result-version {
+  font-size: 12px;
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
+}
+
+/* Modpack mods list */
+.modpack-mods {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modpack-mod-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.modpack-mod-item .mod-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modpack-mod-item .mod-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 200px;
+}
+
+.version-input {
+  width: 100px !important;
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+  font-family: var(--font-mono) !important;
+}
+
+.btn-remove {
+  color: var(--accent-red) !important;
+}
+
+.btn-remove:hover {
+  background: rgba(255, 112, 128, 0.15) !important;
 }

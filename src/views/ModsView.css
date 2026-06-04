@@ -16,15 +16,105 @@
   margin: 0 0 6px;
 }
 
-.install-progress .progress-info {
+.status-count {
+  color: var(--accent-cyan);
+}
+
+.btn-update {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px !important;
+  font-size: 15px !important;
+}
+
+.btn-update svg {
+  width: 20px;
+  height: 20px;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+}
+
+.status-badge svg {
+  width: 18px;
+  height: 18px;
+}
+
+.status-ok {
+  color: #004422;
+  background: linear-gradient(135deg, var(--accent-green) 0%, #40d070 100%);
+  box-shadow: 0 2px 12px rgba(110, 240, 144, 0.3);
+}
+
+.install-progress {
+  overflow: visible;
+}
+
+.install-progress .card-body {
+  padding: 20px 24px;
+}
+
+.progress-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.progress-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: rgba(94, 232, 255, 0.15);
+  border-radius: var(--radius-sm);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.progress-icon svg {
+  width: 24px;
+  height: 24px;
+  color: var(--accent-cyan);
+}
+
+.progress-info {
+  flex: 1;
   display: flex;
   justify-content: space-between;
-  margin-bottom: 10px;
-  font-size: 14px;
-  color: var(--text-secondary);
+  align-items: center;
+}
+
+.progress-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.progress-percent {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  font-family: var(--font-mono);
 }
 
 .error-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 14px 18px;
   background: rgba(255, 112, 128, 0.15);
   border: 1px solid rgba(255, 112, 128, 0.35);
@@ -32,6 +122,12 @@
   color: var(--accent-red);
   font-size: 14px;
   backdrop-filter: blur(10px);
+}
+
+.error-banner svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .changelog-card .card-header {
@@ -81,10 +177,15 @@
   justify-content: space-between;
   padding: 14px 0;
   border-bottom: 1px solid var(--border-color);
+  transition: background 0.15s ease;
 }
 
 .mod-item:last-child {
   border-bottom: none;
+}
+
+.mod-item.installed {
+  opacity: 0.7;
 }
 
 .mod-info {

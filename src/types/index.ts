@@ -33,6 +33,7 @@ export interface Config {
   vanillaGistUrl: string
   selectedModpack?: string
   newsGistUrl?: string
+  githubToken?: string
 }
 
 declare global {

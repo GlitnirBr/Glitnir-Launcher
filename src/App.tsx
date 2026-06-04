@@ -284,6 +284,7 @@ export default function App() {
         <AdminLoginModal
           onSuccess={handleAdminLogin}
           onClose={() => setShowAdminModal(false)}
+          adminPassword={(config as any)?.adminPassword}
         />
       )}
 

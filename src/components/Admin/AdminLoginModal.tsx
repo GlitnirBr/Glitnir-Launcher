@@ -4,17 +4,20 @@ import './AdminLoginModal.css'
 interface Props {
   onSuccess: () => void
   onClose: () => void
+  adminPassword?: string
 }
 
-const ADMIN_PASSWORD = 'glitnir2024'
+const DEFAULT_PASSWORD = 'glitnir2024'
 
-export default function AdminLoginModal({ onSuccess, onClose }: Props) {
+export default function AdminLoginModal({ onSuccess, onClose, adminPassword }: Props) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
+  const correctPassword = adminPassword || DEFAULT_PASSWORD
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (password === ADMIN_PASSWORD) {
+    if (password === correctPassword) {
       onSuccess()
     } else {
       setError('Senha incorreta')
