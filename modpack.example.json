@@ -1,0 +1,25 @@
+{
+  "version": "1.3.0",
+  "updatedAt": "2024-01-15T00:00:00Z",
+  "changelog": "- Adicionado mod ValheimPlus 0.9.13\n- Atualizado Epic Loot para 0.9.35\n- Removido mod antigo de minimap\n- Correção de crash no boss Yagluth",
+  "mods": [
+    {
+      "name": "BepInExPack",
+      "version": "5.4.2202",
+      "thunderstoreId": "denikson-BepInExPack_Valheim",
+      "description": "Framework base para mods"
+    },
+    {
+      "name": "ValheimPlus",
+      "version": "0.9.13.1",
+      "thunderstoreId": "Grantapher-Valheim_Plus",
+      "description": "Melhorias gerais de gameplay"
+    },
+    {
+      "name": "EpicLoot",
+      "version": "0.9.35",
+      "thunderstoreId": "RandyKnapp-EpicLoot",
+      "description": "Sistema de loot épico"
+    }
+  ]
+}

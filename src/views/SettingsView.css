@@ -1,0 +1,36 @@
+.settings-view {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 700px;
+}
+
+.settings-header h1 {
+  font-size: 24px;
+  margin: 0 0 4px;
+}
+
+.settings-section .card-header h3 {
+  margin: 0;
+}
+
+.setting-description {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0 0 16px;
+}
+
+.path-input-group {
+  display: flex;
+  gap: 8px;
+}
+
+.path-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+}

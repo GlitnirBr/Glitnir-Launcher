@@ -1,0 +1,111 @@
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--titlebar-height);
+  min-height: var(--titlebar-height);
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border-color);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.titlebar-drag {
+  flex: 1;
+}
+
+.titlebar-right {
+  display: flex;
+  align-items: center;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.admin-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 3px 6px;
+  background: rgba(0, 174, 255, 0.15);
+  color: var(--accent-blue);
+  border-radius: var(--radius-sm);
+}
+
+.user-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.btn-admin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-admin svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+
+.btn-admin:hover {
+  background: var(--bg-tertiary);
+}
+
+.btn-admin:hover svg {
+  color: var(--text-primary);
+}
+
+.titlebar-controls {
+  display: flex;
+}
+
+.control-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: var(--titlebar-height);
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.control-btn svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.control-btn:hover {
+  background: var(--bg-tertiary);
+}
+
+.control-btn:hover svg {
+  color: var(--text-primary);
+}
+
+.control-btn.close:hover {
+  background: #c42b1c;
+}
+
+.control-btn.close:hover svg {
+  color: white;
+}

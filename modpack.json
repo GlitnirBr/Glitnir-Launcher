@@ -1,0 +1,343 @@
+{
+  "version": "1.0.1",
+  "updatedAt": "2026-05-29T00:00:00Z",
+  "serverName": "Glitnir Fantasy",
+  "changelog": "- Versão oficial 1.0.1\n- Pacote completo do servidor Glitnir Fantasy\n- Inclui todas as raças customizadas (LNE)\n- Mods exclusivos Glitnir: Creatures, Dungeons, Weapons, Locations\n- Sistema MMO: EpicMMO + Enchantments\n- Guildas, grupos e personagens vinculados ao servidor",
+  "mods": [
+    {
+      "name": "BepInExPack Valheim",
+      "thunderstoreId": "denikson-BepInExPack_Valheim",
+      "description": "Framework base para mods"
+    },
+    {
+      "name": "Clutter",
+      "thunderstoreId": "plumga-Clutter",
+      "description": "Objetos decorativos"
+    },
+    {
+      "name": "STU Ward",
+      "thunderstoreId": "sighsorry-STUWard",
+      "description": "Sistema de ward"
+    },
+    {
+      "name": "YamlDotNet",
+      "thunderstoreId": "ValheimModding-YamlDotNet",
+      "description": "Dependência YAML"
+    },
+    {
+      "name": "Linjeaeras Race",
+      "thunderstoreId": "Azathoth-LinejaeserasRace",
+      "description": "Raça customizada"
+    },
+    {
+      "name": "AzuAntiArthriticCrafting",
+      "thunderstoreId": "Azumatt-AzuAntiArthriticCrafting",
+      "description": "Crafting melhorado"
+    },
+    {
+      "name": "AzuAntiCheat Webhook",
+      "thunderstoreId": "Azumatt-AzuAntiCheat",
+      "description": "Anti-cheat"
+    },
+    {
+      "name": "AzuExtendedPlayerInventory",
+      "thunderstoreId": "Azumatt-AzuExtendedPlayerInventory",
+      "description": "Inventário expandido"
+    },
+    {
+      "name": "AzuWearNTearPatches",
+      "thunderstoreId": "Azumatt-AzuWearNTearPatches",
+      "description": "Patches de desgaste"
+    },
+    {
+      "name": "ChangeOfScenery",
+      "thunderstoreId": "Azumatt-ChangeOfScenery",
+      "description": "Mudança de cenário"
+    },
+    {
+      "name": "LogoChanger",
+      "thunderstoreId": "Azumatt-LogoChanger",
+      "description": "Logo customizado"
+    },
+    {
+      "name": "Historical Heritage",
+      "thunderstoreId": "Dreanegade-Historical_Heritage",
+      "description": "Conteúdo histórico"
+    },
+    {
+      "name": "Hunter Legacy",
+      "thunderstoreId": "Dreanegade-Hunter_Legacy",
+      "description": "Classe caçador"
+    },
+    {
+      "name": "Magic Supremacy",
+      "thunderstoreId": "Dreanegade-Magic_Supremacy",
+      "description": "Sistema de magia"
+    },
+    {
+      "name": "Glitnir Eternium Armor",
+      "thunderstoreId": "Glitnir-Glitnir_Eternium_Armor",
+      "description": "Armadura Eternium do servidor"
+    },
+    {
+      "name": "GoldenJude BlacksmithTools",
+      "thunderstoreId": "GoldenJude-BlacksmithTools",
+      "description": "Ferramentas de ferreiro"
+    },
+    {
+      "name": "Marketplace And Server NPCs",
+      "thunderstoreId": "RustyMods-Marketplace",
+      "description": "Marketplace e NPCs"
+    },
+    {
+      "name": "Odin Banners",
+      "thunderstoreId": "Raelaziel-OdinBanners",
+      "description": "Banners decorativos"
+    },
+    {
+      "name": "MonsterDB",
+      "thunderstoreId": "RustyMods-MonsterDB",
+      "description": "Database de monstros"
+    },
+    {
+      "name": "More Vanilla Build Prefabs",
+      "thunderstoreId": "Searica-More_Vanilla_Build_Prefabs",
+      "description": "Mais itens de construção"
+    },
+    {
+      "name": "Outsiders",
+      "thunderstoreId": "UnJohnny-Outsiders",
+      "description": "Conteúdo extra"
+    },
+    {
+      "name": "EpicMMO System",
+      "thunderstoreId": "WackyMole-EpicMMOSystem",
+      "description": "Sistema MMO"
+    },
+    {
+      "name": "EpicMMO System UI",
+      "thunderstoreId": "WackyMole-EpicMMOSystemUI",
+      "description": "Interface do MMO"
+    },
+    {
+      "name": "Wackys Database",
+      "thunderstoreId": "WackyMole-WackysDatabase",
+      "description": "Database de itens"
+    },
+    {
+      "name": "Glitnir Fome e Gloria",
+      "thunderstoreId": "XutzBR-GlitnirFomeEGloria",
+      "description": "Mod exclusivo Glitnir"
+    },
+    {
+      "name": "Dragon Armory",
+      "thunderstoreId": "Yggdrah-DragonArmory",
+      "description": "Arsenal de dragão"
+    },
+    {
+      "name": "I Believe I Can Fly",
+      "thunderstoreId": "Yggdrah-IBelieveICanFly",
+      "description": "Sistema de voo"
+    },
+    {
+      "name": "LNE Draenei",
+      "thunderstoreId": "bsmith-LNE_Draenei",
+      "description": "Raça Draenei"
+    },
+    {
+      "name": "LNE Enano",
+      "thunderstoreId": "bsmith-LNE_Enano",
+      "description": "Raça Anão"
+    },
+    {
+      "name": "LNE Goblin",
+      "thunderstoreId": "bsmith-LNE_Goblin",
+      "description": "Raça Goblin"
+    },
+    {
+      "name": "LNE Jotun",
+      "thunderstoreId": "bsmith-LNE_Jotun",
+      "description": "Raça Jotun"
+    },
+    {
+      "name": "LNE Mirmidon",
+      "thunderstoreId": "bsmith-LNE_Mirmidon",
+      "description": "Raça Mirmidon"
+    },
+    {
+      "name": "LNE Muspelheim",
+      "thunderstoreId": "bsmith-LNE_Muspelheim",
+      "description": "Raça Muspelheim"
+    },
+    {
+      "name": "LNE Niflborn",
+      "thunderstoreId": "bsmith-LNE_Niflborn",
+      "description": "Raça Niflborn"
+    },
+    {
+      "name": "LNE Nomuerto",
+      "thunderstoreId": "bsmith-LNE_Nomuerto",
+      "description": "Raça Morto-Vivo"
+    },
+    {
+      "name": "LNE Orc Urukai",
+      "thunderstoreId": "bsmith-LNE_OrcoUrukai",
+      "description": "Raça Orc Urukai"
+    },
+    {
+      "name": "LNE Troll",
+      "thunderstoreId": "bsmith-LNE_Troll",
+      "description": "Raça Troll"
+    },
+    {
+      "name": "LNE Tiefling",
+      "thunderstoreId": "bsmith-LNE_Tiefling",
+      "description": "Raça Tiefling"
+    },
+    {
+      "name": "LNE Potion Elf",
+      "thunderstoreId": "bsmith-LNE_potionelf",
+      "description": "Raça Elfo da Poção"
+    },
+    {
+      "name": "Valheim Enchantment System",
+      "thunderstoreId": "kg-ValheimEnchantmentSystem",
+      "description": "Sistema de encantamentos"
+    },
+    {
+      "name": "Gizmo Reloaded",
+      "thunderstoreId": "m3to-GizmoReloaded",
+      "description": "Ferramenta de construção"
+    },
+    {
+      "name": "Glitnir Blood Angel",
+      "thunderstoreId": "marlthon-GlitnirBloodAngel",
+      "description": "Classe anjo de sangue"
+    },
+    {
+      "name": "Glitnir Blood Weapon",
+      "thunderstoreId": "marlthon-GlitnirBloodWeapon",
+      "description": "Armas de sangue"
+    },
+    {
+      "name": "Glitnir Creatures",
+      "thunderstoreId": "marlthon-GlitnirCreatures",
+      "description": "Criaturas do servidor"
+    },
+    {
+      "name": "Glitnir Dungeons",
+      "thunderstoreId": "marlthon-GlitnirDungeons",
+      "description": "Dungeons do servidor"
+    },
+    {
+      "name": "Glitnir Extras",
+      "thunderstoreId": "marlthon-GlitnirExtras",
+      "description": "Extras do servidor"
+    },
+    {
+      "name": "Glitnir Locations",
+      "thunderstoreId": "marlthon-GlitnirLocations",
+      "description": "Localizações do servidor"
+    },
+    {
+      "name": "Glitnir Memorial",
+      "thunderstoreId": "marlthon-GlitnirMemorial",
+      "description": "Memorial do servidor"
+    },
+    {
+      "name": "Glitnir Weapons",
+      "thunderstoreId": "marlthon-GlitnirWeapons",
+      "description": "Armas do servidor"
+    },
+    {
+      "name": "Creature Level Control",
+      "thunderstoreId": "Smoothbrain-CreatureLevelAndLootControl",
+      "description": "Controle de level de criaturas"
+    },
+    {
+      "name": "Groups",
+      "thunderstoreId": "Smoothbrain-Groups",
+      "description": "Sistema de grupos"
+    },
+    {
+      "name": "Guilds",
+      "thunderstoreId": "Smoothbrain-Guilds",
+      "description": "Sistema de guildas"
+    },
+    {
+      "name": "Sailing",
+      "thunderstoreId": "Smoothbrain-Sailing",
+      "description": "Sistema de navegação melhorado"
+    },
+    {
+      "name": "Server Characters",
+      "thunderstoreId": "Smoothbrain-ServerCharacters",
+      "description": "Personagens vinculados ao servidor"
+    },
+    {
+      "name": "Target Portal",
+      "thunderstoreId": "Smoothbrain-TargetPortal",
+      "description": "Portais com destino fixo"
+    },
+    {
+      "name": "Biome Lock",
+      "thunderstoreId": "radamanto-BiomeLock",
+      "description": "Lock de bioma"
+    },
+    {
+      "name": "DiveIn",
+      "thunderstoreId": "sighsorry-DiveIn",
+      "description": "Sistema de mergulho"
+    },
+    {
+      "name": "Expand World Data",
+      "thunderstoreId": "JereKuusela-Expand_World_Data",
+      "description": "Dados de mundo expandido"
+    },
+    {
+      "name": "Expand World Size",
+      "thunderstoreId": "JereKuusela-Expand_World_Size",
+      "description": "Tamanho do mundo expandido"
+    },
+    {
+      "name": "World Advancement Progression",
+      "thunderstoreId": "Comfy-World_Advancement_Progression",
+      "description": "Progressão de mundo"
+    },
+    {
+      "name": "MKNPC",
+      "thunderstoreId": "horemvore-MKNPC",
+      "description": "Criador de NPCs"
+    },
+    {
+      "name": "Timeout Limit",
+      "thunderstoreId": "maxsch-TimeoutLimit",
+      "description": "Limite de timeout"
+    },
+    {
+      "name": "VNEI",
+      "thunderstoreId": "RandyKnapp-VNEI",
+      "description": "Encyclopedia de itens"
+    },
+    {
+      "name": "Spawner Tweaks",
+      "thunderstoreId": "JereKuusela-Spawner_Tweaks",
+      "description": "Ajustes de spawner"
+    },
+    {
+      "name": "Structure Tweaks",
+      "thunderstoreId": "JereKuusela-Structure_Tweaks",
+      "description": "Ajustes de estrutura"
+    },
+    {
+      "name": "Random Spawn Point",
+      "thunderstoreId": "vapok-RandomSpawnPointBruh",
+      "description": "Spawn aleatório"
+    },
+    {
+      "name": "Blood Angel Marlthon",
+      "thunderstoreId": "marlthon-GlitnirBloodAngel",
+      "description": "Anjo de sangue Glitnir"
+    }
+  ]
+}
