@@ -1,15 +1,16 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.8);
+  background: rgba(10, 22, 40, 0.9);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 200;
+  backdrop-filter: blur(5px);
 }
 
 .modal-box {
-  background: var(--bg-card);
+  background: linear-gradient(180deg, rgba(15, 40, 70, 0.95) 0%, rgba(10, 30, 55, 0.95) 100%);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   padding: 28px 32px;
@@ -17,14 +18,16 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-lg), var(--shadow-glow);
+  backdrop-filter: blur(10px);
 }
 
 .modal-box h3 {
-  color: var(--text-primary);
+  color: var(--accent-cyan);
   font-size: 18px;
   font-weight: 600;
   margin: 0;
+  text-shadow: 0 0 10px rgba(77, 217, 255, 0.3);
 }
 
 .modal-box p {
@@ -66,29 +69,30 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .btn-cancel:hover {
   color: var(--text-primary);
   border-color: var(--border-light);
-  background: var(--bg-tertiary);
+  background: rgba(77, 217, 255, 0.1);
 }
 
 .btn-confirm {
   padding: 10px 20px;
   font-size: 14px;
   font-weight: 600;
-  color: white;
-  background: var(--accent-blue);
+  color: #0a1628;
+  background: linear-gradient(180deg, var(--accent-cyan) 0%, var(--accent-cyan-dark) 100%);
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
+  box-shadow: var(--shadow-glow);
 }
 
 .btn-confirm:hover:not(:disabled) {
-  background: var(--accent-blue-hover);
+  background: linear-gradient(180deg, var(--accent-cyan-hover) 0%, var(--accent-cyan) 100%);
 }
 
 .btn-confirm:disabled {

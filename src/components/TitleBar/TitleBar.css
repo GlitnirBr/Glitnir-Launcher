@@ -4,7 +4,7 @@
   justify-content: space-between;
   height: var(--titlebar-height);
   min-height: var(--titlebar-height);
-  background: var(--bg-sidebar);
+  background: rgba(10, 22, 40, 0.9);
   border-bottom: 1px solid var(--border-color);
   -webkit-app-region: drag;
   user-select: none;
@@ -31,10 +31,11 @@
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 3px 6px;
-  background: rgba(0, 174, 255, 0.15);
-  color: var(--accent-blue);
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  background: rgba(77, 217, 255, 0.2);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(77, 217, 255, 0.3);
   border-radius: var(--radius-sm);
 }
 
@@ -54,7 +55,7 @@
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .btn-admin svg {
@@ -64,11 +65,11 @@
 }
 
 .btn-admin:hover {
-  background: var(--bg-tertiary);
+  background: rgba(77, 217, 255, 0.15);
 }
 
 .btn-admin:hover svg {
-  color: var(--text-primary);
+  color: var(--accent-cyan);
 }
 
 .titlebar-controls {
@@ -85,7 +86,7 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition: background 0.15s ease;
 }
 
 .control-btn svg {
@@ -95,7 +96,7 @@
 }
 
 .control-btn:hover {
-  background: var(--bg-tertiary);
+  background: rgba(77, 217, 255, 0.15);
 }
 
 .control-btn:hover svg {

@@ -4,9 +4,11 @@
   height: 280px;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  background: linear-gradient(135deg, #1a2a3a 0%, #0d1520 100%);
+  background: linear-gradient(135deg, #0d2040 0%, #1a4070 50%, #2a5090 100%);
   background-size: cover;
   background-position: center;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
 }
 
 .hero-overlay {
@@ -14,9 +16,9 @@
   inset: 0;
   background: linear-gradient(
     to right,
-    rgba(13, 15, 20, 0.95) 0%,
-    rgba(13, 15, 20, 0.7) 40%,
-    rgba(13, 15, 20, 0.3) 100%
+    rgba(10, 22, 40, 0.9) 0%,
+    rgba(10, 22, 40, 0.6) 40%,
+    rgba(10, 22, 40, 0.2) 100%
   );
 }
 
@@ -33,10 +35,11 @@
 .hero-title {
   font-size: 32px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--accent-cyan);
   margin: 0 0 8px;
   line-height: 1.2;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 20px rgba(77, 217, 255, 0.4);
 }
 
 .hero-subtitle {
@@ -51,15 +54,17 @@
   padding: 10px 24px;
   font-size: 14px;
   font-weight: 600;
-  color: white;
-  background: var(--accent-blue);
+  color: #0a1628;
+  background: linear-gradient(180deg, var(--accent-cyan) 0%, var(--accent-cyan-dark) 100%);
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
+  box-shadow: var(--shadow-glow);
 }
 
 .hero-cta:hover {
-  background: var(--accent-blue-hover);
-  transform: translateY(-1px);
+  background: linear-gradient(180deg, var(--accent-cyan-hover) 0%, var(--accent-cyan) 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 0 25px rgba(77, 217, 255, 0.5);
 }
