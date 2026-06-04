@@ -2,10 +2,56 @@
 
 Launcher oficial do servidor Valheim Glitnir.
 
+## Download
+
+**[Baixar Glitnir Launcher](../../releases/latest/download/Glitnir.Launcher.Setup.exe)** (Windows)
+
+Ou acesse a página de [Releases](../../releases) para ver todas as versões.
+
+---
+
+## Funcionalidades
+
+- Gerenciamento automático de mods do servidor
+- Atualização com um clique
+- Notícias e eventos do servidor
+- Seleção entre Vanilla e modpacks
+- Interface estilo Battle.net
+
 ## Tecnologias
+
 - Electron 28
 - React 18 + TypeScript
 - Vite 5
+
+## Para Desenvolvedores
+
+### Setup inicial
+
+```bash
+npm install
+npm run dev
+```
+
+### Build local (.exe)
+
+```bash
+npm run build
+# Gera release/Glitnir Launcher Setup.exe
+```
+
+### Build via GitHub Actions
+
+O projeto compila automaticamente quando você cria uma tag:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+O `.exe` será publicado automaticamente na página de Releases.
+
+---
 
 ## Estrutura do projeto
 
@@ -15,54 +61,41 @@ glitnir-launcher/
 │   ├── main.ts        ← Processo principal (Node.js / APIs do sistema)
 │   └── preload.ts     ← Bridge segura entre Electron e React
 ├── src/
-│   ├── components/
-│   │   ├── Login/     ← Tela de login
-│   │   ├── Home/      ← Layout principal + sidebar
-│   │   ├── TitleBar/  ← Barra de título customizada
-│   │   └── Tabs/      ← TabGlitnir, TabVanilla, TabAdmin
-│   ├── utils/
-│   │   ├── auth.ts        ← Login/logout com backend
-│   │   └── modManager.ts  ← Fetch modpack, download, comparação de versões
-│   ├── types/
-│   │   └── index.ts   ← Interfaces TypeScript
-│   ├── App.tsx
-│   └── main.tsx
-├── modpack.example.json  ← Exemplo do modpack.json (hospedar no GitHub)
-└── package.json
+│   ├── components/    ← Componentes React (Sidebar, TitleBar, News, etc.)
+│   ├── views/         ← Páginas (Home, Mods, Settings, Admin)
+│   ├── utils/         ← Funções utilitárias (modManager, etc.)
+│   ├── types/         ← Interfaces TypeScript
+│   └── App.tsx
+└── .github/workflows/ ← GitHub Actions para build automático
 ```
 
-## Setup inicial
+## Configuração do Modpack
 
-```bash
-npm install
-npm run dev
+O launcher busca o modpack de uma URL configurável (GitHub Gist recomendado).
+
+Exemplo de `modpack.json`:
+```json
+{
+  "version": "1.0.0",
+  "updatedAt": "2026-06-04",
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "date": "2026-06-04",
+      "changes": ["Primeira versão do modpack"]
+    }
+  ],
+  "mods": [
+    {
+      "name": "BepInExPack Valheim",
+      "version": "5.4.2200",
+      "thunderstoreId": "denikson-BepInExPack_Valheim"
+    }
+  ]
+}
 ```
 
-## Build (.exe)
-
-```bash
-npm run build
-# Gera release/Glitnir Launcher Setup.exe
-```
-
-## Configurações necessárias
-
-### 1. URL do modpack.json
-Em `src/utils/modManager.ts`, altere:
-```ts
-const MODPACK_URL = 'https://raw.githubusercontent.com/SEU_USER/glitnir-modpack/main/modpack.json'
-```
-
-### 2. URL de autenticação
-Em `src/utils/auth.ts`, altere:
-```ts
-const AUTH_URL = 'https://api.seuservidor.com/auth'
-```
-
-### 3. Links do Discord e GitHub
-Em `TabAdmin.tsx` e `Login.tsx`, atualize os links do servidor.
-
-## Como funciona o lançamento do jogo (estilo R2 Modman)
+## Como funciona
 
 O launcher cria um perfil isolado em:
 ```
