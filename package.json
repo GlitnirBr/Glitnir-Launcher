@@ -28,7 +28,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "luizgseixas",
+      "owner": "GlitnirBr",
       "repo": "Glitnir-Launcher"
     }
   },
