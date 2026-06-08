@@ -60,7 +60,7 @@ export default function ModsView({
     <div className="mods-view">
       <div className="mods-header">
         <div>
-          <h1>Mods do Modpack</h1>
+          <h1>{modpack?.name || 'Mods do Modpack'}</h1>
           {modpack && (
             <p className="text-secondary">
               Versao {modpack.version} — <span className="status-count">{installedCount}/{totalCount} instalados</span>
@@ -121,20 +121,13 @@ export default function ModsView({
         </div>
       )}
 
-      {modpack && modpack.changelog && modpack.changelog.length > 0 && (
+      {modpack && modpack.description && (
         <div className="changelog-card card">
           <div className="card-header">
-            <h3>Changelog — v{modpack.changelog[0].version}</h3>
-            <span className="text-muted">
-              {new Date(modpack.changelog[0].date).toLocaleDateString('pt-BR')}
-            </span>
+            <h3>Sobre o modpack</h3>
           </div>
           <div className="card-body">
-            <ul className="changelog-list">
-              {modpack.changelog[0].changes.map((change, i) => (
-                <li key={i}>{change}</li>
-              ))}
-            </ul>
+            <p className="text-secondary">{modpack.description}</p>
           </div>
         </div>
       )}
@@ -151,11 +144,14 @@ export default function ModsView({
             </p>
           )}
           <div className="mod-items">
-            {mods.map(mod => (
-              <div key={mod.name} className={`mod-item ${mod.installed && !mod.outdated ? 'installed' : ''}`}>
+            {mods.map((mod, i) => (
+              <div key={`${mod.name}-${i}`} className={`mod-item ${mod.installed && !mod.outdated ? 'installed' : ''}`}>
                 <div className="mod-info">
-                  <span className="mod-name">{mod.name}</span>
-                  <span className="mod-version">v{mod.version}</span>
+                  <span className="mod-name">
+                    {mod.name}
+                    {mod.source === 'private' && <span className="badge badge-warning" style={{ marginLeft: 8 }}>privado</span>}
+                  </span>
+                  <span className="mod-version">{mod.version ? `v${mod.version}` : mod.filename}</span>
                 </div>
                 <div className="mod-status">
                   {mod.outdated && <span className="badge badge-warning">Desatualizado</span>}

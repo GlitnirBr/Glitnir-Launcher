@@ -21,16 +21,19 @@ contextBridge.exposeInMainWorld('glitnir', {
   },
 
   mods: {
-    install: (args: { zipPath: string; modName: string }) =>
+    install: (args: { zipPath: string; modName: string; profile: string }) =>
       ipcRenderer.invoke('mods:install', args),
-    download: (args: { url: string; modName: string }) =>
+    download: (args: { url: string; modName: string; headers?: Record<string, string> }) =>
       ipcRenderer.invoke('mods:download', args),
-    list: () => ipcRenderer.invoke('mods:list'),
-    remove: (modName: string) => ipcRenderer.invoke('mods:remove', modName),
+    list: (profile: string) => ipcRenderer.invoke('mods:list', profile),
+    remove: (args: { modName: string; profile: string }) =>
+      ipcRenderer.invoke('mods:remove', args),
+    applyConfig: (args: { profile: string; installPath: string; content: string }) =>
+      ipcRenderer.invoke('mods:applyConfig', args),
   },
 
   game: {
-    launch: (args: { valheimPath: string; mode: 'vanilla' | 'glitnir' }) =>
+    launch: (args: { valheimPath: string; mode: 'vanilla' | 'modded'; profile: string }) =>
       ipcRenderer.invoke('game:launch', args),
   },
 

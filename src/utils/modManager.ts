@@ -1,67 +1,51 @@
-export interface Mod {
-  name: string
-  version: string
-  thunderstoreId: string
-  description?: string
-  installed?: boolean
-  outdated?: boolean
+import { Mod, Modpack } from '../types'
+
+export const DEFAULT_MODPACK_REPO = 'GlitnirBr/Glitnir-Modpack'
+export const DEFAULT_MODPACK_BRANCH = 'main'
+
+/** Monta a URL raw do modpack.json público no GitHub. */
+export function buildModpackRawUrl(repo?: string, branch?: string): string {
+  const r = repo || DEFAULT_MODPACK_REPO
+  const b = branch || DEFAULT_MODPACK_BRANCH
+  return `https://raw.githubusercontent.com/${r}/${b}/modpack.json`
 }
 
-export interface Modpack {
-  version: string
-  updatedAt: string
-  changelog: { version: string; date: string; changes: string[] }[]
-  mods: Mod[]
-}
-
-export async function fetchModpack(
-  _server: 'glitnir' | 'vanilla' = 'glitnir',
-  url?: string
-): Promise<Modpack> {
-  const finalUrl = url || ''
-  if (!finalUrl) throw new Error('URL do modpack não configurada')
-  const res = await fetch(finalUrl + '?t=' + Date.now())
+/** Busca um modpack a partir de uma URL raw. */
+export async function fetchModpackFromUrl(url: string): Promise<Modpack> {
+  if (!url) throw new Error('URL do modpack não configurada')
+  const res = await fetch(url + (url.includes('?') ? '&' : '?') + 't=' + Date.now())
   if (!res.ok) throw new Error('Falha ao buscar modpack')
-  return res.json()
+  return normalizeModpack(await res.json())
 }
 
-export async function downloadMod(
-  mod: Mod,
-  onProgress?: (pct: number) => void
-): Promise<ArrayBuffer> {
-  const parts = mod.thunderstoreId.split('-')
-  const namespace = parts[0]
-  const name = parts[1]
-  const url = `https://thunderstore.io/package/download/${namespace}/${name}/${mod.version}/`
-
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Falha ao baixar ${mod.name}`)
-
-  const total = Number(res.headers.get('content-length') || 0)
-  const reader = res.body!.getReader()
-  const chunks: Uint8Array[] = []
-  let received = 0
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
-    received += value.length
-    if (total && onProgress) onProgress(Math.round((received / total) * 100))
+/** Garante os campos esperados e defaults do manifesto. */
+export function normalizeModpack(data: any): Modpack {
+  return {
+    version: data.version || '0.0.0',
+    name: data.name || 'Modpack',
+    description: data.description || '',
+    updatedAt: data.updatedAt,
+    mods: Array.isArray(data.mods) ? data.mods.map(normalizeMod) : [],
+    configs: Array.isArray(data.configs) ? data.configs : [],
   }
-
-  const combined = new Uint8Array(received)
-  let offset = 0
-  for (const chunk of chunks) {
-    combined.set(chunk, offset)
-    offset += chunk.length
-  }
-  return combined.buffer
 }
 
-export function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
+function normalizeMod(m: any): Mod {
+  const source = m.source === 'private' ? 'private' : 'thunderstore'
+  return {
+    name: m.name,
+    source,
+    namespace: m.namespace,
+    version: m.version,
+    filename: m.filename,
+    downloadUrl: m.downloadUrl || '',
+    description: m.description,
+  }
+}
+
+export function compareVersions(a?: string, b?: string): number {
+  const pa = (a || '0').split('.').map(Number)
+  const pb = (b || '0').split('.').map(Number)
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const diff = (pa[i] || 0) - (pb[i] || 0)
     if (diff !== 0) return diff
@@ -69,10 +53,11 @@ export function compareVersions(a: string, b: string): number {
   return 0
 }
 
+/** Marca cada mod como instalado/desatualizado comparando com os mods instalados. */
 export function checkOutdated(
   installed: { name: string; version: string }[],
-  modpack: Modpack
-) {
+  modpack: Modpack,
+): (Mod & { installed: boolean; outdated: boolean })[] {
   return modpack.mods.map(mod => {
     const inst = installed.find(m => m.name === mod.name)
     return {

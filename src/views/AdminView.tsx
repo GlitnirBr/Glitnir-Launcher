@@ -1,74 +1,92 @@
-import { useState, useEffect } from 'react'
-import { Config, Mod, Modpack } from '../types'
-import { searchMods, ThunderstoreMod, getThunderstoreId } from '../utils/thunderstoreApi'
-import { updateGist, extractGistId } from '../utils/githubApi'
+import { useState, useEffect, useCallback } from 'react'
+import { Config, Mod, ModConfig, Modpack } from '../types'
+import { searchMods, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
+import { fetchModpackFromUrl, buildModpackRawUrl } from '../utils/modManager'
+import { getAdminModpack, publishModpack } from '../utils/backendApi'
 import './AdminView.css'
-
-interface ModpackConfig {
-  id: string
-  name: string
-  gistUrl: string | null
-  builtin?: boolean
-}
 
 interface Props {
   config: Config
-  modpacks: ModpackConfig[]
+  adminToken: string | null
   onSave: (updates: Partial<Config>) => Promise<void>
-  onUpdateModpacks: (modpacks: ModpackConfig[]) => Promise<void>
 }
 
-export default function AdminView({ config, modpacks, onSave, onUpdateModpacks }: Props) {
-  const [activeTab, setActiveTab] = useState<'config' | 'modpack' | 'news'>('config')
+type Target = 'main' | 'admin'
 
-  // Config tab state
-  const [glitnirGistUrl, setGlitnirGistUrl] = useState(config.glitnirGistUrl)
-  const [newsGistUrl, setNewsGistUrl] = useState((config as any).newsGistUrl || '')
-  const [githubToken, setGithubToken] = useState((config as any).githubToken || '')
-  const [adminPassword, setAdminPassword] = useState((config as any).adminPassword || '')
+export default function AdminView({ config, adminToken, onSave }: Props) {
+  const [activeTab, setActiveTab] = useState<'config' | 'modpack' | 'configs'>('config')
 
-  // Modpack tab state
-  const [currentModpack, setCurrentModpack] = useState<Modpack | null>(null)
+  // Config tab
+  const [backendUrl, setBackendUrl] = useState(config.backendUrl || '')
+  const [modpackRepo, setModpackRepo] = useState(config.modpackRepo || '')
+  const [modpackBranch, setModpackBranch] = useState(config.modpackBranch || 'main')
+  const [newsUrl, setNewsUrl] = useState(config.newsUrl || '')
+
+  // Modpack tab
+  const [target, setTarget] = useState<Target>('main')
+  const [packName, setPackName] = useState('')
+  const [packDescription, setPackDescription] = useState('')
+  const [packVersion, setPackVersion] = useState('1.0.0')
   const [modpackMods, setModpackMods] = useState<Mod[]>([])
+  const [modpackConfigs, setModpackConfigs] = useState<ModConfig[]>([])
+
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<ThunderstoreMod[]>([])
   const [searching, setSearching] = useState(false)
-  const [modpackVersion, setModpackVersion] = useState('')
-  const [changelogEntry, setChangelogEntry] = useState('')
+
+  // Private mod form
+  const [privName, setPrivName] = useState('')
+  const [privFilename, setPrivFilename] = useState('')
+
+  // Config form
+  const [cfgMod, setCfgMod] = useState('')
+  const [cfgFilename, setCfgFilename] = useState('')
+  const [cfgInstallPath, setCfgInstallPath] = useState('')
+  const [cfgContent, setCfgContent] = useState('')
 
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [publishing, setPublishing] = useState(false)
 
-  // Load current modpack
-  useEffect(() => {
-    async function loadModpack() {
-      if (!config.glitnirGistUrl) return
-      try {
-        const res = await fetch(config.glitnirGistUrl + '?t=' + Date.now())
-        if (res.ok) {
-          const data = await res.json()
-          setCurrentModpack(data)
-          setModpackMods(data.mods || [])
-          setModpackVersion(data.version || '1.0.0')
-        }
-      } catch {
-        // ignore
+  const loadModpackForEdit = useCallback(async () => {
+    setError('')
+    try {
+      let data: Modpack | null = null
+      if (target === 'admin') {
+        if (!adminToken) return
+        data = await getAdminModpack(adminToken, backendUrl)
+      } else {
+        const url = buildModpackRawUrl(modpackRepo, modpackBranch)
+        data = await fetchModpackFromUrl(url)
       }
+      if (data) {
+        setPackName(data.name || '')
+        setPackDescription(data.description || '')
+        setPackVersion(data.version || '1.0.0')
+        setModpackMods(data.mods || [])
+        setModpackConfigs(data.configs || [])
+      }
+    } catch {
+      // modpack ainda não existe — começa vazio
+      setPackName(target === 'admin' ? 'Modpack Teste Admin' : 'Modpack Servidor Principal')
+      setPackDescription('')
+      setPackVersion('1.0.0')
+      setModpackMods([])
+      setModpackConfigs([])
     }
-    loadModpack()
-  }, [config.glitnirGistUrl])
+  }, [target, adminToken, backendUrl, modpackRepo, modpackBranch])
+
+  useEffect(() => {
+    if (activeTab === 'modpack' || activeTab === 'configs') loadModpackForEdit()
+  }, [activeTab, loadModpackForEdit])
 
   async function handleSaveConfig() {
     setSaving(true)
     setSaved(false)
     setError('')
     try {
-      await onSave({
-        glitnirGistUrl,
-        ...({ newsGistUrl, githubToken, adminPassword: adminPassword || undefined } as any)
-      })
+      await onSave({ backendUrl, modpackRepo, modpackBranch, newsUrl })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (err: any) {
@@ -83,8 +101,7 @@ export default function AdminView({ config, modpacks, onSave, onUpdateModpacks }
     setSearching(true)
     setError('')
     try {
-      const results = await searchMods(searchQuery)
-      setSearchResults(results)
+      setSearchResults(await searchMods(searchQuery))
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -92,72 +109,88 @@ export default function AdminView({ config, modpacks, onSave, onUpdateModpacks }
     }
   }
 
-  function handleAddMod(tsMod: ThunderstoreMod) {
-    const newMod: Mod = {
-      name: tsMod.name,
-      version: tsMod.latest.version_number,
-      thunderstoreId: getThunderstoreId(tsMod),
-      description: tsMod.latest.description.slice(0, 100)
+  function handleAddThunderstoreMod(ts: ThunderstoreMod) {
+    if (modpackMods.some(m => m.source === 'thunderstore' && m.namespace === ts.owner && m.name === ts.name)) return
+    const mod: Mod = {
+      name: ts.name,
+      source: 'thunderstore',
+      namespace: ts.owner,
+      version: ts.latest.version_number,
+      downloadUrl: getDownloadUrl(ts.owner, ts.name, ts.latest.version_number),
+      description: ts.latest.description?.slice(0, 120),
     }
-
-    if (modpackMods.some(m => m.thunderstoreId === newMod.thunderstoreId)) {
-      return // Already added
-    }
-
-    setModpackMods([...modpackMods, newMod])
+    setModpackMods([...modpackMods, mod])
     setSearchResults([])
     setSearchQuery('')
   }
 
-  function handleRemoveMod(thunderstoreId: string) {
-    setModpackMods(modpackMods.filter(m => m.thunderstoreId !== thunderstoreId))
+  function handleAddPrivateMod() {
+    if (!privName.trim() || !privFilename.trim()) return
+    const mod: Mod = {
+      name: privName.trim(),
+      source: 'private',
+      filename: privFilename.trim(),
+      downloadUrl: `/mods/private/${privFilename.trim()}`,
+    }
+    setModpackMods([...modpackMods, mod])
+    setPrivName('')
+    setPrivFilename('')
   }
 
-  function handleUpdateModVersion(thunderstoreId: string, version: string) {
-    setModpackMods(modpackMods.map(m =>
-      m.thunderstoreId === thunderstoreId ? { ...m, version } : m
-    ))
+  function handleRemoveMod(index: number) {
+    setModpackMods(modpackMods.filter((_, i) => i !== index))
   }
 
-  async function handlePublishModpack() {
-    if (!githubToken) {
-      setError('Configure o token do GitHub primeiro')
+  function handleUpdateModVersion(index: number, version: string) {
+    setModpackMods(modpackMods.map((m, i) => {
+      if (i !== index) return m
+      const updated = { ...m, version }
+      if (m.source === 'thunderstore' && m.namespace) {
+        updated.downloadUrl = getDownloadUrl(m.namespace, m.name, version)
+      }
+      return updated
+    }))
+  }
+
+  function handleAddConfig() {
+    if (!cfgFilename.trim()) return
+    const installPath = cfgInstallPath.trim() || `BepInEx/config/${cfgFilename.trim()}`
+    const cfg: ModConfig = {
+      mod: cfgMod.trim(),
+      filename: cfgFilename.trim(),
+      installPath,
+      content: cfgContent,
+    }
+    setModpackConfigs([...modpackConfigs, cfg])
+    setCfgMod('')
+    setCfgFilename('')
+    setCfgInstallPath('')
+    setCfgContent('')
+  }
+
+  function handleRemoveConfig(index: number) {
+    setModpackConfigs(modpackConfigs.filter((_, i) => i !== index))
+  }
+
+  async function handlePublish() {
+    if (!adminToken) {
+      setError('Sessão de admin expirada. Faça login novamente.')
       return
     }
-
-    const gistId = extractGistId(glitnirGistUrl)
-    if (!gistId) {
-      setError('URL do Gist invalida')
-      return
-    }
-
     setPublishing(true)
     setError('')
-
     try {
-      const newChangelog = changelogEntry.trim()
-        ? [{
-            version: modpackVersion,
-            date: new Date().toISOString().split('T')[0],
-            changes: changelogEntry.split('\n').filter(l => l.trim())
-          }, ...(currentModpack?.changelog || [])]
-        : currentModpack?.changelog || []
-
-      const newModpack: Modpack = {
-        version: modpackVersion,
+      const modpack: Modpack = {
+        version: packVersion,
+        name: packName,
+        description: packDescription,
         updatedAt: new Date().toISOString(),
-        changelog: newChangelog,
-        mods: modpackMods
+        mods: modpackMods,
+        configs: modpackConfigs,
       }
-
-      await updateGist(gistId, githubToken, {
-        'modpack.json': { content: JSON.stringify(newModpack, null, 2) }
-      })
-
-      setCurrentModpack(newModpack)
-      setChangelogEntry('')
+      await publishModpack(adminToken, target, modpack, undefined, backendUrl)
       setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      setTimeout(() => setSaved(false), 2500)
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -166,101 +199,83 @@ export default function AdminView({ config, modpacks, onSave, onUpdateModpacks }
   }
 
   const hasConfigChanges =
-    glitnirGistUrl !== config.glitnirGistUrl ||
-    newsGistUrl !== ((config as any).newsGistUrl || '') ||
-    githubToken !== ((config as any).githubToken || '') ||
-    adminPassword !== ((config as any).adminPassword || '')
+    backendUrl !== (config.backendUrl || '') ||
+    modpackRepo !== (config.modpackRepo || '') ||
+    modpackBranch !== (config.modpackBranch || 'main') ||
+    newsUrl !== (config.newsUrl || '')
 
   return (
     <div className="admin-view">
       <div className="admin-header">
         <h1>Painel Admin</h1>
-        <p className="text-secondary">Gerencie o servidor, modpacks e noticias.</p>
+        <p className="text-secondary">Gerencie configurações, modpacks e configs dos mods.</p>
       </div>
 
       <div className="admin-tabs">
-        <button
-          className={`admin-tab ${activeTab === 'config' ? 'active' : ''}`}
-          onClick={() => setActiveTab('config')}
-        >
-          Configuracoes
+        <button className={`admin-tab ${activeTab === 'config' ? 'active' : ''}`} onClick={() => setActiveTab('config')}>
+          Configurações
         </button>
-        <button
-          className={`admin-tab ${activeTab === 'modpack' ? 'active' : ''}`}
-          onClick={() => setActiveTab('modpack')}
-        >
+        <button className={`admin-tab ${activeTab === 'modpack' ? 'active' : ''}`} onClick={() => setActiveTab('modpack')}>
           Modpack
         </button>
-        <button
-          className={`admin-tab ${activeTab === 'news' ? 'active' : ''}`}
-          onClick={() => setActiveTab('news')}
-        >
-          Noticias
+        <button className={`admin-tab ${activeTab === 'configs' ? 'active' : ''}`} onClick={() => setActiveTab('configs')}>
+          Configs dos Mods
         </button>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
 
+      {activeTab !== 'config' && (
+        <div className="admin-section card">
+          <div className="card-body">
+            <div className="form-group">
+              <label>Modpack alvo</label>
+              <div className="search-row">
+                <button className={`btn-${target === 'main' ? 'secondary' : 'ghost'}`} onClick={() => setTarget('main')}>
+                  Servidor Principal (público)
+                </button>
+                <button className={`btn-${target === 'admin' ? 'secondary' : 'ghost'}`} onClick={() => setTarget('admin')}>
+                  Teste Admin (secreto)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'config' && (
         <>
           <div className="admin-section card">
-            <div className="card-header">
-              <h3>URLs dos Gists</h3>
-            </div>
+            <div className="card-header"><h3>Backend e Repositório</h3></div>
             <div className="card-body">
               <div className="form-group">
-                <label>URL do Modpack Glitnir</label>
-                <input
-                  type="text"
-                  value={glitnirGistUrl}
-                  onChange={e => setGlitnirGistUrl(e.target.value)}
-                  placeholder="https://gist.githubusercontent.com/.../modpack.json"
-                />
-                <span className="form-hint">URL raw do arquivo modpack.json no Gist.</span>
+                <label>URL do Backend (Cloudflare)</label>
+                <input type="text" value={backendUrl} onChange={e => setBackendUrl(e.target.value)}
+                  placeholder="https://glitnir-launcher-backend.workers.dev" />
+                <span className="form-hint">Usado para login, publicar modpacks e mods privados.</span>
               </div>
-
               <div className="form-group">
-                <label>URL das Noticias</label>
-                <input
-                  type="text"
-                  value={newsGistUrl}
-                  onChange={e => setNewsGistUrl(e.target.value)}
-                  placeholder="https://gist.githubusercontent.com/.../news.json"
-                />
-                <span className="form-hint">URL raw do arquivo news.json no Gist (opcional).</span>
+                <label>Repositório do Modpack (owner/repo)</label>
+                <input type="text" value={modpackRepo} onChange={e => setModpackRepo(e.target.value)}
+                  placeholder="GlitnirBr/glitnir-modpack" />
+                <span className="form-hint">Onde fica o modpack.json público (lido via raw GitHub).</span>
               </div>
-
               <div className="form-group">
-                <label>Token GitHub (para publicar)</label>
-                <input
-                  type="password"
-                  value={githubToken}
-                  onChange={e => setGithubToken(e.target.value)}
-                  placeholder="ghp_xxxxxxxxxxxx"
-                />
-                <span className="form-hint">Token com permissao de Gist. Necessario para publicar modpack.</span>
+                <label>Branch</label>
+                <input type="text" value={modpackBranch} onChange={e => setModpackBranch(e.target.value)}
+                  placeholder="main" style={{ width: '150px' }} />
               </div>
-
               <div className="form-group">
-                <label>Senha de Admin</label>
-                <input
-                  type="password"
-                  value={adminPassword}
-                  onChange={e => setAdminPassword(e.target.value)}
-                  placeholder="Deixe vazio para usar padrao (glitnir2024)"
-                />
-                <span className="form-hint">Senha para acessar o painel admin. Padrao: glitnir2024</span>
+                <label>URL das Notícias (opcional)</label>
+                <input type="text" value={newsUrl} onChange={e => setNewsUrl(e.target.value)}
+                  placeholder="https://raw.githubusercontent.com/.../news.json" />
               </div>
             </div>
           </div>
 
           <div className="admin-actions">
-            <button
-              className="btn-play"
-              style={{ width: 'auto', padding: '12px 32px' }}
-              onClick={handleSaveConfig}
-              disabled={!hasConfigChanges || saving}
-            >
+            <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
+              onClick={handleSaveConfig} disabled={!hasConfigChanges || saving}>
               {saving ? 'Salvando...' : saved ? 'Salvo!' : 'Salvar'}
             </button>
           </div>
@@ -270,129 +285,174 @@ export default function AdminView({ config, modpacks, onSave, onUpdateModpacks }
       {activeTab === 'modpack' && (
         <>
           <div className="admin-section card">
-            <div className="card-header">
-              <h3>Buscar Mods no Thunderstore</h3>
+            <div className="card-header"><h3>Informações do Modpack</h3></div>
+            <div className="card-body">
+              <div className="form-group">
+                <label>Nome</label>
+                <input type="text" value={packName} onChange={e => setPackName(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>Descrição</label>
+                <input type="text" value={packDescription} onChange={e => setPackDescription(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label>Versão</label>
+                <input type="text" value={packVersion} onChange={e => setPackVersion(e.target.value)}
+                  style={{ width: '150px' }} />
+              </div>
             </div>
+          </div>
+
+          <div className="admin-section card">
+            <div className="card-header"><h3>Buscar Mods no Thunderstore</h3></div>
             <div className="card-body">
               <div className="search-row">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Digite o nome do mod..."
-                  onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                />
+                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Digite o nome do mod..." onKeyDown={e => e.key === 'Enter' && handleSearch()} />
                 <button className="btn-secondary" onClick={handleSearch} disabled={searching}>
                   {searching ? 'Buscando...' : 'Buscar'}
                 </button>
               </div>
-
               {searchResults.length > 0 && (
                 <div className="search-results">
-                  {searchResults.map(mod => (
-                    <div key={mod.full_name} className="search-result-item">
-                      <div className="result-info">
-                        <span className="result-name">{mod.name}</span>
-                        <span className="result-owner">por {mod.owner}</span>
-                        <span className="result-version">v{mod.latest.version_number}</span>
+                  {searchResults.map(mod => {
+                    const already = modpackMods.some(m => m.source === 'thunderstore' && m.namespace === mod.owner && m.name === mod.name)
+                    return (
+                      <div key={mod.full_name} className="search-result-item">
+                        <div className="result-info">
+                          <span className="result-name">{mod.name}</span>
+                          <span className="result-owner">por {mod.owner}</span>
+                          <span className="result-version">v{mod.latest.version_number}</span>
+                        </div>
+                        <button className="btn-ghost" onClick={() => handleAddThunderstoreMod(mod)} disabled={already}>
+                          {already ? 'Adicionado' : '+ Adicionar'}
+                        </button>
                       </div>
-                      <button
-                        className="btn-ghost"
-                        onClick={() => handleAddMod(mod)}
-                        disabled={modpackMods.some(m => m.thunderstoreId === getThunderstoreId(mod))}
-                      >
-                        {modpackMods.some(m => m.thunderstoreId === getThunderstoreId(mod)) ? 'Adicionado' : '+ Adicionar'}
-                      </button>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
           </div>
 
           <div className="admin-section card">
-            <div className="card-header">
-              <h3>Mods do Modpack ({modpackMods.length})</h3>
+            <div className="card-header"><h3>Adicionar Mod Privado</h3></div>
+            <div className="card-body">
+              <div className="search-row">
+                <input type="text" value={privName} onChange={e => setPrivName(e.target.value)}
+                  placeholder="Nome do mod" />
+                <input type="text" value={privFilename} onChange={e => setPrivFilename(e.target.value)}
+                  placeholder="arquivo.zip" />
+                <button className="btn-secondary" onClick={handleAddPrivateMod} disabled={!privName.trim() || !privFilename.trim()}>
+                  + Adicionar
+                </button>
+              </div>
+              <span className="form-hint">Mods privados são baixados pelo backend a partir do repo privado.</span>
             </div>
+          </div>
+
+          <div className="admin-section card">
+            <div className="card-header"><h3>Mods do Modpack ({modpackMods.length})</h3></div>
             <div className="card-body">
               {modpackMods.length === 0 ? (
-                <p className="text-muted">Nenhum mod adicionado. Use a busca acima.</p>
+                <p className="text-muted">Nenhum mod adicionado.</p>
               ) : (
                 <div className="modpack-mods">
-                  {modpackMods.map(mod => (
-                    <div key={mod.thunderstoreId} className="modpack-mod-item">
+                  {modpackMods.map((mod, index) => (
+                    <div key={`${mod.name}-${index}`} className="modpack-mod-item">
                       <div className="mod-info">
-                        <span className="mod-name">{mod.name}</span>
-                        <input
-                          type="text"
-                          value={mod.version}
-                          onChange={e => handleUpdateModVersion(mod.thunderstoreId, e.target.value)}
-                          className="version-input"
-                        />
+                        <span className="mod-name">
+                          {mod.name}{' '}
+                          <span className={`badge ${mod.source === 'private' ? 'badge-warning' : 'badge-update'}`}>
+                            {mod.source === 'private' ? 'privado' : 'thunderstore'}
+                          </span>
+                        </span>
+                        {mod.source === 'thunderstore' ? (
+                          <input type="text" value={mod.version || ''} className="version-input"
+                            onChange={e => handleUpdateModVersion(index, e.target.value)} />
+                        ) : (
+                          <span className="text-muted">{mod.filename}</span>
+                        )}
                       </div>
-                      <button
-                        className="btn-ghost btn-remove"
-                        onClick={() => handleRemoveMod(mod.thunderstoreId)}
-                      >
-                        Remover
-                      </button>
+                      <button className="btn-ghost btn-remove" onClick={() => handleRemoveMod(index)}>Remover</button>
                     </div>
                   ))}
                 </div>
               )}
-            </div>
-          </div>
-
-          <div className="admin-section card">
-            <div className="card-header">
-              <h3>Publicar Modpack</h3>
-            </div>
-            <div className="card-body">
-              <div className="form-group">
-                <label>Versao do Modpack</label>
-                <input
-                  type="text"
-                  value={modpackVersion}
-                  onChange={e => setModpackVersion(e.target.value)}
-                  placeholder="1.0.0"
-                  style={{ width: '150px' }}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Changelog (uma mudanca por linha)</label>
-                <textarea
-                  value={changelogEntry}
-                  onChange={e => setChangelogEntry(e.target.value)}
-                  placeholder="Adicionado mod X&#10;Atualizado mod Y para v2.0&#10;Removido mod Z"
-                  rows={4}
-                />
-              </div>
             </div>
           </div>
 
           <div className="admin-actions">
-            <button
-              className="btn-play"
-              style={{ width: 'auto', padding: '12px 32px' }}
-              onClick={handlePublishModpack}
-              disabled={publishing || modpackMods.length === 0}
-            >
-              {publishing ? 'Publicando...' : saved ? 'Publicado!' : 'Publicar no Gist'}
+            <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
+              onClick={handlePublish} disabled={publishing}>
+              {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Principal' : 'Admin'})`}
             </button>
           </div>
         </>
       )}
 
-      {activeTab === 'news' && (
-        <div className="admin-section card">
-          <div className="card-header">
-            <h3>Gerenciar Noticias</h3>
+      {activeTab === 'configs' && (
+        <>
+          <div className="admin-section card">
+            <div className="card-header"><h3>Adicionar Config</h3></div>
+            <div className="card-body">
+              <div className="form-group">
+                <label>Mod relacionado</label>
+                <select value={cfgMod} onChange={e => setCfgMod(e.target.value)}>
+                  <option value="">— selecione —</option>
+                  {modpackMods.map((m, i) => <option key={i} value={m.name}>{m.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Nome do arquivo</label>
+                <input type="text" value={cfgFilename} onChange={e => setCfgFilename(e.target.value)}
+                  placeholder="valheim_plus.cfg" />
+              </div>
+              <div className="form-group">
+                <label>Caminho de instalação</label>
+                <input type="text" value={cfgInstallPath} onChange={e => setCfgInstallPath(e.target.value)}
+                  placeholder="BepInEx/config/valheim_plus.cfg" />
+                <span className="form-hint">Relativo ao perfil. Vazio = BepInEx/config/&lt;arquivo&gt;.</span>
+              </div>
+              <div className="form-group">
+                <label>Conteúdo (texto literal ou URL http)</label>
+                <textarea value={cfgContent} onChange={e => setCfgContent(e.target.value)} rows={6}
+                  placeholder="# Conteúdo do config aqui, ou uma URL https para buscar" />
+              </div>
+              <button className="btn-secondary" onClick={handleAddConfig} disabled={!cfgFilename.trim()}>
+                + Adicionar Config
+              </button>
+            </div>
           </div>
-          <div className="card-body">
-            <p className="text-muted">Em breve: editor de noticias e eventos.</p>
+
+          <div className="admin-section card">
+            <div className="card-header"><h3>Configs do Modpack ({modpackConfigs.length})</h3></div>
+            <div className="card-body">
+              {modpackConfigs.length === 0 ? (
+                <p className="text-muted">Nenhuma config adicionada.</p>
+              ) : (
+                <div className="modpack-mods">
+                  {modpackConfigs.map((cfg, index) => (
+                    <div key={`${cfg.filename}-${index}`} className="modpack-mod-item">
+                      <div className="mod-info">
+                        <span className="mod-name">{cfg.filename}</span>
+                        <span className="text-muted">{cfg.installPath}{cfg.mod ? ` · ${cfg.mod}` : ''}</span>
+                      </div>
+                      <button className="btn-ghost btn-remove" onClick={() => handleRemoveConfig(index)}>Remover</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+
+          <div className="admin-actions">
+            <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
+              onClick={handlePublish} disabled={publishing}>
+              {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Principal' : 'Admin'})`}
+            </button>
+          </div>
+        </>
       )}
     </div>
   )

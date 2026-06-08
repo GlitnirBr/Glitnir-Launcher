@@ -3,22 +3,15 @@ import Layout from './components/Layout/Layout'
 import AdminLoginModal from './components/Admin/AdminLoginModal'
 import UpdateNotification from './components/UpdateNotification/UpdateNotification'
 import { HomeView, ModsView, SettingsView, AdminView } from './views'
-import { fetchModpack, checkOutdated } from './utils/modManager'
-import { Config, Modpack, Mod } from './types'
+import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated } from './utils/modManager'
+import { getAdminModpack, resolvePrivateMod } from './utils/backendApi'
+import { Config, Modpack, Mod, ModpackEntry } from './types'
 import { NewsItem } from './components/News'
 import './App.css'
 
-interface ModpackConfig {
-  id: string
-  name: string
-  gistUrl: string | null
-  builtin?: boolean
-}
-
-const DEFAULT_MODPACKS: ModpackConfig[] = [
-  { id: 'vanilla', name: 'Vanilla', gistUrl: null, builtin: true },
-  { id: 'glitnir', name: 'Glitnir Fantasy', gistUrl: '' }
-]
+const VANILLA: ModpackEntry = { id: 'vanilla', name: 'Vanilla', type: 'vanilla', builtin: true }
+const MAIN: ModpackEntry = { id: 'principal', name: 'Servidor Principal', type: 'public' }
+const ADMIN_TEST: ModpackEntry = { id: 'admin-teste', name: 'Teste Admin', type: 'admin' }
 
 interface NewsData {
   featured?: {
@@ -36,11 +29,11 @@ export default function App() {
   const [loading, setLoading] = useState(true)
 
   const [isAdmin, setIsAdmin] = useState(false)
+  const [adminToken, setAdminToken] = useState<string | null>(null)
   const [showAdminModal, setShowAdminModal] = useState(false)
 
   const [currentView, setCurrentView] = useState('home')
-  const [selectedModpack, setSelectedModpack] = useState('glitnir')
-  const [modpacks, setModpacks] = useState<ModpackConfig[]>(DEFAULT_MODPACKS)
+  const [selectedModpack, setSelectedModpack] = useState('principal')
 
   const [modpackData, setModpackData] = useState<Modpack | null>(null)
   const [mods, setMods] = useState<(Mod & { installed?: boolean; outdated?: boolean })[]>([])
@@ -52,35 +45,32 @@ export default function App() {
 
   const [isPlaying, setIsPlaying] = useState(false)
 
+  const modpacks: ModpackEntry[] = isAdmin
+    ? [VANILLA, MAIN, ADMIN_TEST]
+    : [VANILLA, MAIN]
+
   const loadConfig = useCallback(async () => {
     try {
       const cfg = await window.glitnir.config.load()
       setConfig({
         valheimPath: cfg.valheimPath || '',
         installedMods: cfg.installedMods || [],
-        adminHash: cfg.adminHash || '',
-        glitnirGistUrl: cfg.glitnirGistUrl || '',
-        vanillaGistUrl: cfg.vanillaGistUrl || ''
+        installedByProfile: cfg.installedByProfile || {},
+        backendUrl: cfg.backendUrl || '',
+        modpackRepo: cfg.modpackRepo || '',
+        modpackBranch: cfg.modpackBranch || 'main',
+        newsUrl: cfg.newsUrl || '',
+        selectedModpack: cfg.selectedModpack,
       })
-
-      if (cfg.glitnirGistUrl) {
-        setModpacks(prev =>
-          prev.map(mp =>
-            mp.id === 'glitnir' ? { ...mp, gistUrl: cfg.glitnirGistUrl } : mp
-          )
-        )
-      }
-
-      if (cfg.selectedModpack) {
-        setSelectedModpack(cfg.selectedModpack)
-      }
+      if (cfg.selectedModpack) setSelectedModpack(cfg.selectedModpack)
     } catch {
       setConfig({
         valheimPath: '',
         installedMods: [],
-        adminHash: '',
-        glitnirGistUrl: '',
-        vanillaGistUrl: ''
+        installedByProfile: {},
+        backendUrl: '',
+        modpackRepo: '',
+        modpackBranch: 'main',
       })
     } finally {
       setLoading(false)
@@ -88,45 +78,46 @@ export default function App() {
   }, [])
 
   const loadModpack = useCallback(async () => {
-    if (selectedModpack === 'vanilla') {
-      setModpackData(null)
-      setMods([])
-      return
-    }
+    if (!config) return
 
-    const mp = modpacks.find(m => m.id === selectedModpack)
-    if (!mp?.gistUrl) {
+    const entry = modpacks.find(m => m.id === selectedModpack)
+    if (!entry || entry.type === 'vanilla') {
       setModpackData(null)
       setMods([])
       return
     }
 
     try {
-      const data = await fetchModpack('glitnir', mp.gistUrl)
+      let data: Modpack
+      if (entry.type === 'admin') {
+        if (!adminToken) {
+          setModpackData(null)
+          setMods([])
+          return
+        }
+        data = await getAdminModpack(adminToken, config.backendUrl)
+      } else {
+        const url = buildModpackRawUrl(config.modpackRepo, config.modpackBranch)
+        data = await fetchModpackFromUrl(url)
+      }
+
       setModpackData(data)
-      const installedMods = await window.glitnir.mods.list()
-      const modsWithStatus = checkOutdated(
-        installedMods.map(name => ({ name, version: '0.0.0' })),
-        data
-      )
-      setMods(modsWithStatus)
+      const installed = config.installedByProfile?.[entry.id] || []
+      setMods(checkOutdated(installed, data))
     } catch (err) {
-      console.error('Failed to load modpack:', err)
+      console.error('Falha ao carregar modpack:', err)
       setModpackData(null)
       setMods([])
     }
-  }, [selectedModpack, modpacks])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedModpack, config, adminToken, isAdmin])
 
   const loadNews = useCallback(async () => {
-    const newsUrl = (config as any)?.newsGistUrl
+    const newsUrl = config?.newsUrl
     if (!newsUrl) return
-
     try {
       const res = await fetch(newsUrl + '?t=' + Date.now())
-      if (res.ok) {
-        const data = await res.json()
-        setNewsData(data)
-      }
+      if (res.ok) setNewsData(await res.json())
     } catch {
       // ignore
     }
@@ -148,71 +139,99 @@ export default function App() {
     await loadConfig()
   }
 
-  async function handleUpdateModpacks(newModpacks: ModpackConfig[]) {
-    setModpacks(newModpacks)
-  }
-
   async function handleInstallMods() {
-    if (!modpackData) return
+    if (!modpackData || !config) return
 
     setInstalling(true)
-    const toInstall = mods.filter(m => !m.installed || m.outdated)
+    try {
+      const profile = selectedModpack
+      const toInstall = mods.filter(m => !m.installed || m.outdated)
 
-    for (let i = 0; i < toInstall.length; i++) {
-      const mod = toInstall[i]
-      setInstallStatus(`Baixando ${mod.name}...`)
-      setInstallProgress(Math.round((i / toInstall.length) * 100))
+      for (let i = 0; i < toInstall.length; i++) {
+        const mod = toInstall[i]
+        setInstallStatus(`Baixando ${mod.name}...`)
+        setInstallProgress(Math.round((i / Math.max(toInstall.length, 1)) * 90))
 
-      const [namespace, name] = mod.thunderstoreId.split('-')
-      const url = `https://thunderstore.io/package/download/${namespace}/${name}/${mod.version}/`
+        let url = mod.downloadUrl
+        let headers: Record<string, string> | undefined
 
-      const downloadResult = await window.glitnir.mods.download({ url, modName: mod.name })
-      if (!downloadResult.success) {
-        throw new Error(downloadResult.error || 'Falha no download')
+        if (mod.source === 'private') {
+          if (!adminToken) throw new Error('Faça login de admin para baixar mods privados')
+          const resolved = resolvePrivateMod(mod.downloadUrl, adminToken, config.backendUrl)
+          url = resolved.url
+          headers = resolved.headers
+        }
+
+        const dl = await window.glitnir.mods.download({ url, modName: mod.name, headers })
+        if (!dl.success) throw new Error(dl.error || `Falha ao baixar ${mod.name}`)
+
+        setInstallStatus(`Instalando ${mod.name}...`)
+        const inst = await window.glitnir.mods.install({
+          zipPath: dl.tempPath!,
+          modName: mod.name,
+          profile,
+        })
+        if (!inst.success) throw new Error(inst.error || `Falha ao instalar ${mod.name}`)
       }
 
-      setInstallStatus(`Instalando ${mod.name}...`)
-
-      const installResult = await window.glitnir.mods.install({
-        zipPath: downloadResult.tempPath!,
-        modName: mod.name
-      })
-      if (!installResult.success) {
-        throw new Error(installResult.error || 'Falha na instalação')
+      // Aplica as configs do modpack.
+      const configs = modpackData.configs || []
+      for (let i = 0; i < configs.length; i++) {
+        const cfg = configs[i]
+        setInstallStatus(`Aplicando config ${cfg.filename}...`)
+        setInstallProgress(90 + Math.round((i / Math.max(configs.length, 1)) * 10))
+        await window.glitnir.mods.applyConfig({
+          profile,
+          installPath: cfg.installPath,
+          content: cfg.content,
+        })
       }
+
+      // Registra os mods instalados desse perfil.
+      const installedList = modpackData.mods.map(m => ({ name: m.name, version: m.version || '0.0.0' }))
+      const installedByProfile = { ...(config.installedByProfile || {}), [profile]: installedList }
+      await handleSaveConfig({ installedByProfile })
+
+      setInstallProgress(100)
+      setInstallStatus('Concluído!')
+    } catch (err: any) {
+      setInstallStatus(err.message || 'Erro na instalação')
+      throw err
+    } finally {
+      setInstalling(false)
     }
-
-    setInstallProgress(100)
-    setInstallStatus('Concluido!')
-    setInstalling(false)
-    await loadModpack()
   }
 
   async function handlePlay() {
     if (!config?.valheimPath) {
       const path = await window.glitnir.dialog.selectValheimPath()
-      if (path) {
-        await handleSaveConfig({ valheimPath: path })
-      }
+      if (path) await handleSaveConfig({ valheimPath: path })
       return
     }
 
     setIsPlaying(true)
-    const mode = selectedModpack === 'vanilla' ? 'vanilla' : 'glitnir'
-    await window.glitnir.game.launch({ valheimPath: config.valheimPath, mode })
+    const mode = selectedModpack === 'vanilla' ? 'vanilla' : 'modded'
+    await window.glitnir.game.launch({
+      valheimPath: config.valheimPath,
+      mode,
+      profile: selectedModpack,
+    })
     setIsPlaying(false)
   }
 
   function handleAdminClick() {
     if (isAdmin) {
       setIsAdmin(false)
+      setAdminToken(null)
+      if (selectedModpack === ADMIN_TEST.id) setSelectedModpack('principal')
       setCurrentView('home')
     } else {
       setShowAdminModal(true)
     }
   }
 
-  function handleAdminLogin() {
+  function handleAdminLogin(token: string) {
+    setAdminToken(token)
     setIsAdmin(true)
     setShowAdminModal(false)
   }
@@ -273,18 +292,17 @@ export default function App() {
         {currentView === 'admin' && isAdmin && config && (
           <AdminView
             config={config}
-            modpacks={modpacks}
+            adminToken={adminToken}
             onSave={handleSaveConfig}
-            onUpdateModpacks={handleUpdateModpacks}
           />
         )}
       </Layout>
 
-      {showAdminModal && (
+      {showAdminModal && config && (
         <AdminLoginModal
+          backendUrl={config.backendUrl}
           onSuccess={handleAdminLogin}
           onClose={() => setShowAdminModal(false)}
-          adminPassword={(config as any)?.adminPassword}
         />
       )}
 

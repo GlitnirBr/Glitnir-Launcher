@@ -3,37 +3,73 @@ export interface User {
   role: 'player' | 'admin'
 }
 
+export type ModSource = 'thunderstore' | 'private'
+
 export interface Mod {
   name: string
-  version: string
-  thunderstoreId: string
+  source: ModSource
+  /** Thunderstore namespace/owner (source: 'thunderstore') */
+  namespace?: string
+  version?: string
+  /** Nome do arquivo do mod privado (source: 'private') */
+  filename?: string
+  /**
+   * URL de download. Para thunderstore é a URL absoluta do pacote.
+   * Para privados é um caminho relativo resolvido pelo backend (ex: /mods/private/Foo.zip).
+   */
+  downloadUrl: string
   description?: string
+  // runtime
   installed?: boolean
   outdated?: boolean
 }
 
-export interface ChangelogEntry {
-  version: string
-  date: string
-  changes: string[]
+export interface ModConfig {
+  /** Nome do mod ao qual a config pertence (informativo) */
+  mod: string
+  filename: string
+  /** Caminho relativo ao perfil onde o arquivo será escrito (ex: BepInEx/config/foo.cfg) */
+  installPath: string
+  /** Conteúdo literal do config OU uma URL http(s) de onde buscar o conteúdo */
+  content: string
 }
 
 export interface Modpack {
   version: string
-  updatedAt: string
-  changelog: ChangelogEntry[]
+  name: string
+  description: string
   mods: Mod[]
+  configs?: ModConfig[]
+  updatedAt?: string
+}
+
+/** Identifica um modpack na barra lateral. */
+export interface ModpackEntry {
+  id: string
+  name: string
+  type: 'vanilla' | 'public' | 'admin'
+  builtin?: boolean
 }
 
 export interface Config {
   valheimPath: string
   installedMods: { name: string; version: string }[]
-  adminHash: string
-  glitnirGistUrl: string
-  vanillaGistUrl: string
+  /** Mods instalados por perfil/modpack (id -> lista). */
+  installedByProfile?: Record<string, { name: string; version: string }[]>
   selectedModpack?: string
-  newsGistUrl?: string
-  githubToken?: string
+  /** URL base do backend (Cloudflare Worker). */
+  backendUrl?: string
+  /** Repositório do modpack público no formato owner/repo. */
+  modpackRepo?: string
+  /** Branch do repositório do modpack (default: main). */
+  modpackBranch?: string
+  /** URL raw do news.json (opcional). */
+  newsUrl?: string
+}
+
+export interface PrivateModDownload {
+  url: string
+  headers?: Record<string, string>
 }
 
 declare global {
@@ -55,13 +91,14 @@ declare global {
         autoDetect: () => Promise<string>
       }
       mods: {
-        install: (args: { zipPath: string; modName: string }) => Promise<{ success: boolean; error?: string }>
-        download: (args: { url: string; modName: string }) => Promise<{ success: boolean; tempPath?: string; error?: string }>
-        list: () => Promise<string[]>
-        remove: (modName: string) => Promise<{ success: boolean; error?: string }>
+        install: (args: { zipPath: string; modName: string; profile: string }) => Promise<{ success: boolean; error?: string }>
+        download: (args: { url: string; modName: string; headers?: Record<string, string> }) => Promise<{ success: boolean; tempPath?: string; error?: string }>
+        list: (profile: string) => Promise<string[]>
+        remove: (args: { modName: string; profile: string }) => Promise<{ success: boolean; error?: string }>
+        applyConfig: (args: { profile: string; installPath: string; content: string }) => Promise<{ success: boolean; error?: string }>
       }
       game: {
-        launch: (args: { valheimPath: string; mode: 'vanilla' | 'glitnir' }) => Promise<{ success: boolean; error?: string }>
+        launch: (args: { valheimPath: string; mode: 'vanilla' | 'modded'; profile: string }) => Promise<{ success: boolean; error?: string }>
       }
       shell: {
         openExternal: (url: string) => void

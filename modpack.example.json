@@ -1,25 +1,35 @@
 {
-  "version": "1.3.0",
-  "updatedAt": "2024-01-15T00:00:00Z",
-  "changelog": "- Adicionado mod ValheimPlus 0.9.13\n- Atualizado Epic Loot para 0.9.35\n- Removido mod antigo de minimap\n- Correção de crash no boss Yagluth",
+  "version": "1.0.0",
+  "name": "Modpack Servidor Principal",
+  "description": "Modpack oficial do nosso servidor de Valheim.",
   "mods": [
     {
       "name": "BepInExPack",
+      "source": "thunderstore",
+      "namespace": "denikson",
       "version": "5.4.2202",
-      "thunderstoreId": "denikson-BepInExPack_Valheim",
-      "description": "Framework base para mods"
+      "downloadUrl": "https://thunderstore.io/package/download/denikson/BepInExPack_Valheim/5.4.2202/"
     },
     {
       "name": "ValheimPlus",
-      "version": "0.9.13.1",
-      "thunderstoreId": "Grantapher-Valheim_Plus",
-      "description": "Melhorias gerais de gameplay"
+      "source": "thunderstore",
+      "namespace": "valheim_plus_team",
+      "version": "0.9.9.17",
+      "downloadUrl": "https://thunderstore.io/package/download/valheim_plus_team/ValheimPlus/0.9.9.17/"
     },
     {
-      "name": "EpicLoot",
-      "version": "0.9.35",
-      "thunderstoreId": "RandyKnapp-EpicLoot",
-      "description": "Sistema de loot épico"
+      "name": "MeuModPrivado",
+      "source": "private",
+      "filename": "MeuModPrivado-1.0.0.zip",
+      "downloadUrl": "/mods/private/MeuModPrivado-1.0.0.zip"
+    }
+  ],
+  "configs": [
+    {
+      "mod": "ValheimPlus",
+      "filename": "valheim_plus.cfg",
+      "installPath": "BepInEx/config/valheim_plus.cfg",
+      "content": "# Conteúdo do config aqui ou URL para buscar"
     }
   ]
 }

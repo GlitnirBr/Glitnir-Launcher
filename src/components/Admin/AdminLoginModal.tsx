@@ -1,27 +1,30 @@
 import { useState } from 'react'
+import { login } from '../../utils/backendApi'
 import './AdminLoginModal.css'
 
 interface Props {
-  onSuccess: () => void
+  backendUrl?: string
+  onSuccess: (token: string) => void
   onClose: () => void
-  adminPassword?: string
 }
 
-const DEFAULT_PASSWORD = 'glitnir2024'
-
-export default function AdminLoginModal({ onSuccess, onClose, adminPassword }: Props) {
+export default function AdminLoginModal({ backendUrl, onSuccess, onClose }: Props) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  const correctPassword = adminPassword || DEFAULT_PASSWORD
-
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (password === correctPassword) {
-      onSuccess()
-    } else {
-      setError('Senha incorreta')
+    setLoading(true)
+    setError('')
+    try {
+      const token = await login(password, backendUrl)
+      onSuccess(token)
+    } catch (err: any) {
+      setError(err.message || 'Falha na autenticação')
       setPassword('')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -41,7 +44,9 @@ export default function AdminLoginModal({ onSuccess, onClose, adminPassword }: P
           {error && <p className="modal-error">{error}</p>}
           <div className="modal-actions">
             <button type="button" className="btn-cancel" onClick={onClose}>Cancelar</button>
-            <button type="submit" className="btn-confirm" disabled={!password}>Entrar</button>
+            <button type="submit" className="btn-confirm" disabled={!password || loading}>
+              {loading ? 'Entrando...' : 'Entrar'}
+            </button>
           </div>
         </form>
       </div>

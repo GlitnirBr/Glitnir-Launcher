@@ -7,10 +7,21 @@ import { execFile } from 'child_process'
 
 const DATA_PATH = path.join(app.getPath('appData'), 'GlitnirLauncher')
 const CONFIG_FILE = path.join(DATA_PATH, 'config.json')
-const PROFILE_PATH = path.join(DATA_PATH, 'profiles', 'Glitnir')
+const PROFILES_ROOT = path.join(DATA_PATH, 'profiles')
 
-function ensureDirs() {
-  [DATA_PATH, PROFILE_PATH, path.join(PROFILE_PATH, 'BepInEx', 'plugins')].forEach(p => {
+/** Sanitiza o id do modpack para usar como nome de pasta de perfil. */
+function profileDir(profile: string): string {
+  const safe = (profile || 'default').replace(/[^a-zA-Z0-9_-]/g, '_')
+  return path.join(PROFILES_ROOT, safe)
+}
+
+function ensureDirs(profile?: string) {
+  const dirs = [DATA_PATH, PROFILES_ROOT]
+  if (profile) {
+    const p = profileDir(profile)
+    dirs.push(p, path.join(p, 'BepInEx', 'plugins'), path.join(p, 'BepInEx', 'config'))
+  }
+  dirs.forEach(p => {
     if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true })
   })
 }
@@ -37,9 +48,9 @@ function loadConfig() {
     const defaultConfig = {
       valheimPath: detected,
       installedMods: [],
-      adminHash: '',
-      glitnirGistUrl: '',
-      vanillaGistUrl: '',
+      backendUrl: '',
+      modpackRepo: '',
+      modpackBranch: 'main',
     }
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2))
     return defaultConfig
@@ -142,11 +153,12 @@ app.whenReady().then(() => {
     return null
   })
 
-  ipcMain.handle('mods:install', async (_e, { zipPath, modName }) => {
+  ipcMain.handle('mods:install', async (_e, { zipPath, modName, profile }) => {
     try {
+      ensureDirs(profile)
       const AdmZip = require('adm-zip')
       const zip = new AdmZip(zipPath)
-      const pluginsPath = path.join(PROFILE_PATH, 'BepInEx', 'plugins', modName)
+      const pluginsPath = path.join(profileDir(profile), 'BepInEx', 'plugins', modName)
       zip.extractAllTo(pluginsPath, true)
       fs.unlinkSync(zipPath)
       return { success: true }
@@ -155,10 +167,14 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('mods:download', async (_e, { url, modName }) => {
+  ipcMain.handle('mods:download', async (_e, { url, modName, headers }) => {
     try {
       const axios = require('axios')
-      const response = await axios.get(url, { responseType: 'arraybuffer' })
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        headers: headers || undefined,
+        maxRedirects: 5,
+      })
       const tempPath = path.join(os.tmpdir(), `${modName}-${Date.now()}.zip`)
       fs.writeFileSync(tempPath, Buffer.from(response.data))
       return { success: true, tempPath }
@@ -167,16 +183,41 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('mods:list', () => {
-    const pluginsPath = path.join(PROFILE_PATH, 'BepInEx', 'plugins')
+  ipcMain.handle('mods:applyConfig', async (_e, { profile, installPath, content }) => {
+    try {
+      ensureDirs(profile)
+      const base = profileDir(profile)
+      // Impede path traversal para fora do perfil.
+      const target = path.resolve(base, installPath)
+      if (!target.startsWith(path.resolve(base))) {
+        return { success: false, error: 'Caminho de config inválido' }
+      }
+
+      let finalContent = content
+      if (/^https?:\/\//i.test((content || '').trim())) {
+        const axios = require('axios')
+        const res = await axios.get(content.trim(), { responseType: 'text' })
+        finalContent = typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
+      }
+
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.writeFileSync(target, finalContent)
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('mods:list', (_e, profile: string) => {
+    const pluginsPath = path.join(profileDir(profile), 'BepInEx', 'plugins')
     if (!fs.existsSync(pluginsPath)) return []
     return fs.readdirSync(pluginsPath).filter(f =>
       fs.statSync(path.join(pluginsPath, f)).isDirectory()
     )
   })
 
-  ipcMain.handle('mods:remove', (_e, modName: string) => {
-    const modPath = path.join(PROFILE_PATH, 'BepInEx', 'plugins', modName)
+  ipcMain.handle('mods:remove', (_e, { modName, profile }) => {
+    const modPath = path.join(profileDir(profile), 'BepInEx', 'plugins', modName)
     if (fs.existsSync(modPath)) {
       fs.rmSync(modPath, { recursive: true })
       return { success: true }
@@ -184,7 +225,7 @@ app.whenReady().then(() => {
     return { success: false, error: 'Mod não encontrado' }
   })
 
-  ipcMain.handle('game:launch', async (_e, { valheimPath, mode }) => {
+  ipcMain.handle('game:launch', async (_e, { valheimPath, mode, profile }) => {
     try {
       const exe = path.join(valheimPath, 'valheim.exe')
       if (!fs.existsSync(exe)) {
@@ -193,7 +234,7 @@ app.whenReady().then(() => {
       if (mode === 'vanilla') {
         execFile(exe, { detached: true } as any)
       } else {
-        const doorstopDll = path.join(PROFILE_PATH, 'BepInEx', 'core', 'BepInEx.dll')
+        const doorstopDll = path.join(profileDir(profile), 'BepInEx', 'core', 'BepInEx.dll')
         const args = ['--doorstop-enable', 'true', '--doorstop-target', doorstopDll]
         execFile(exe, args as any, { detached: true } as any)
       }
