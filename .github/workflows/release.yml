@@ -20,16 +20,21 @@ jobs:
           node-version: 20
           cache: 'npm'
 
+      - name: Sincronizar versão com a tag
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          $pkg.version = $tag
+          $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
+          Write-Host "Versão atualizada para $tag"
+
       - name: Instalar dependências
         run: npm ci
-
-      - name: Sincronizar versão com a tag
-        shell: bash
-        run: |
-          TAG=${GITHUB_REF_NAME#v}
-          npm version $TAG --no-git-tag-version
 
       - name: Build e publicar release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build -- --publish always
+
+      - name: Listar arquivos gerados
+        run: Get-ChildItem release -Name
