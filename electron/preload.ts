@@ -47,5 +47,8 @@ contextBridge.exposeInMainWorld('glitnir', {
     onStatus: (callback: (data: { status: string }) => void) => {
       ipcRenderer.on('updater:status', (_e, data) => callback(data))
     },
+    onProgress: (callback: (data: { percent: number; transferred: number; total: number }) => void) => {
+      ipcRenderer.on('updater:progress', (_e, data) => callback(data))
+    },
   },
 })

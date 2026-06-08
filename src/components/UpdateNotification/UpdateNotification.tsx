@@ -1,26 +1,24 @@
 import { useState, useEffect } from 'react'
 import './UpdateNotification.css'
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 export default function UpdateNotification() {
-  const [status, setStatus] = useState<'checking' | 'available' | 'downloaded' | null>(null)
+  const [status, setStatus] = useState<'available' | 'downloaded' | null>(null)
+  const [progress, setProgress] = useState<{ percent: number; transferred: number; total: number } | null>(null)
 
   useEffect(() => {
     window.glitnir.updater.onStatus((data) => {
-      if (data.status === 'available') {
-        setStatus('available')
-      } else if (data.status === 'downloaded') {
-        setStatus('downloaded')
-      }
+      if (data.status === 'available') setStatus('available')
+      else if (data.status === 'downloaded') setStatus('downloaded')
+    })
+    window.glitnir.updater.onProgress((data) => {
+      setProgress(data)
     })
   }, [])
-
-  function handleInstall() {
-    window.glitnir.updater.install()
-  }
-
-  function handleDismiss() {
-    setStatus(null)
-  }
 
   if (!status) return null
 
@@ -33,31 +31,47 @@ export default function UpdateNotification() {
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
       </div>
+
       <div className="update-content">
         {status === 'available' && (
           <>
-            <span className="update-title">Atualizacao disponivel</span>
-            <span className="update-desc">Baixando nova versao...</span>
+            <span className="update-title">Atualização disponível</span>
+            {progress ? (
+              <>
+                <div className="update-progress-bar">
+                  <div className="update-progress-fill" style={{ width: `${progress.percent}%` }} />
+                </div>
+                <span className="update-desc">
+                  {progress.percent}% — {formatBytes(progress.transferred)} / {formatBytes(progress.total)}
+                </span>
+              </>
+            ) : (
+              <span className="update-desc">Preparando download...</span>
+            )}
           </>
         )}
         {status === 'downloaded' && (
           <>
-            <span className="update-title">Atualizacao pronta!</span>
-            <span className="update-desc">Reinicie para aplicar.</span>
+            <span className="update-title">Atualização pronta!</span>
+            <span className="update-desc">Clique para reiniciar e aplicar.</span>
           </>
         )}
       </div>
+
       {status === 'downloaded' && (
-        <button className="update-btn" onClick={handleInstall}>
+        <button className="update-btn" onClick={() => window.glitnir.updater.install()}>
           Reiniciar
         </button>
       )}
-      <button className="update-close" onClick={handleDismiss}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <line x1="6" y1="6" x2="18" y2="18" />
-          <line x1="6" y1="18" x2="18" y2="6" />
-        </svg>
-      </button>
+
+      {status === 'downloaded' && (
+        <button className="update-close" onClick={() => setStatus(null)}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="6" y1="6" x2="18" y2="18" />
+            <line x1="6" y1="18" x2="18" y2="6" />
+          </svg>
+        </button>
+      )}
     </div>
   )
 }

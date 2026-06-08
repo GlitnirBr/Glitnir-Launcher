@@ -107,6 +107,7 @@ declare global {
         check: () => Promise<void>
         install: () => Promise<void>
         onStatus: (callback: (data: { status: string }) => void) => void
+        onProgress: (callback: (data: { percent: number; transferred: number; total: number }) => void) => void
       }
     }
   }

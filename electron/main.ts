@@ -107,6 +107,14 @@ app.whenReady().then(() => {
     win.webContents.send('updater:status', { status: 'available' })
   })
 
+  autoUpdater.on('download-progress', (info) => {
+    win.webContents.send('updater:progress', {
+      percent: Math.round(info.percent),
+      transferred: info.transferred,
+      total: info.total,
+    })
+  })
+
   autoUpdater.on('update-downloaded', () => {
     win.webContents.send('updater:status', { status: 'downloaded' })
   })
