@@ -31,10 +31,19 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      - name: Build e publicar release
+      - name: Build
+        run: npm run build -- --publish never
+
+      - name: Criar release e subir arquivos
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run build -- --publish always
-
-      - name: Listar arquivos gerados
-        run: Get-ChildItem release -Name
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release create $tag --title $tag --notes "Release $tag" || true
+          gh release upload $tag "release\latest.yml" --clobber
+          Get-ChildItem release -Filter "*.exe" | ForEach-Object {
+            gh release upload $tag $_.FullName --clobber
+          }
+          Get-ChildItem release -Filter "*.blockmap" | ForEach-Object {
+            gh release upload $tag $_.FullName --clobber
+          }
