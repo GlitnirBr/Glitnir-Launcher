@@ -2,6 +2,7 @@
   "name": "glitnir-launcher",
   "version": "1.0.0",
   "description": "Launcher oficial do servidor Glitnir - Valheim",
+  "author": "GlitnirBr",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k --raw \"vite\" \"wait-on tcp:5173 && electron . --single-instance\"",
