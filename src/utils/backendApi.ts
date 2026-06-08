@@ -1,6 +1,6 @@
 import { Modpack, PrivateModDownload } from '../types'
 
-export const DEFAULT_BACKEND_URL = 'https://glitnir-launcher-backend.workers.dev'
+export const DEFAULT_BACKEND_URL = 'https://glitnir-launcher-backend.glitnir.workers.dev'
 
 function base(backendUrl?: string): string {
   return (backendUrl || DEFAULT_BACKEND_URL).replace(/\/+$/, '')
