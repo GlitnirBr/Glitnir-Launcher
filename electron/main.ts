@@ -121,6 +121,7 @@ app.whenReady().then(() => {
 
   autoUpdater.on('error', (err) => {
     console.error('Auto-updater error:', err)
+    win.webContents.send('updater:status', { status: 'error', message: err.message })
   })
 
   // Check for updates after 3 seconds

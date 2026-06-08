@@ -7,15 +7,26 @@ function formatBytes(bytes: number): string {
 }
 
 export default function UpdateNotification() {
-  const [status, setStatus] = useState<'available' | 'downloaded' | null>(null)
+  const [status, setStatus] = useState<'available' | 'downloaded' | 'error' | null>(null)
+  const [errorMsg, setErrorMsg] = useState('')
   const [progress, setProgress] = useState<{ percent: number; transferred: number; total: number } | null>(null)
+  const [slowTimeout, setSlowTimeout] = useState(false)
 
   useEffect(() => {
     window.glitnir.updater.onStatus((data) => {
-      if (data.status === 'available') setStatus('available')
-      else if (data.status === 'downloaded') setStatus('downloaded')
+      if (data.status === 'available') {
+        setStatus('available')
+        const t = setTimeout(() => setSlowTimeout(true), 10000)
+        return () => clearTimeout(t)
+      } else if (data.status === 'downloaded') {
+        setStatus('downloaded')
+      } else if (data.status === 'error') {
+        setStatus('error')
+        setErrorMsg((data as any).message || 'Erro desconhecido')
+      }
     })
     window.glitnir.updater.onProgress((data) => {
+      setSlowTimeout(false)
       setProgress(data)
     })
   }, [])
@@ -46,7 +57,9 @@ export default function UpdateNotification() {
                 </span>
               </>
             ) : (
-              <span className="update-desc">Preparando download...</span>
+              <span className="update-desc">
+                {slowTimeout ? 'Download lento, aguarde...' : 'Preparando download...'}
+              </span>
             )}
           </>
         )}
@@ -54,6 +67,12 @@ export default function UpdateNotification() {
           <>
             <span className="update-title">Atualização pronta!</span>
             <span className="update-desc">Clique para reiniciar e aplicar.</span>
+          </>
+        )}
+        {status === 'error' && (
+          <>
+            <span className="update-title" style={{ color: '#ff6b6b' }}>Erro na atualização</span>
+            <span className="update-desc" title={errorMsg}>Não foi possível baixar.</span>
           </>
         )}
       </div>
@@ -64,7 +83,7 @@ export default function UpdateNotification() {
         </button>
       )}
 
-      {status === 'downloaded' && (
+      {(status === 'downloaded' || status === 'error') && (
         <button className="update-close" onClick={() => setStatus(null)}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="6" y1="6" x2="18" y2="18" />
