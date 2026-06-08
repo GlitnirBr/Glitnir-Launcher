@@ -4,7 +4,7 @@ Launcher oficial do servidor Valheim Glitnir.
 
 ## Download
 
-**[Baixar Glitnir Launcher](https://github.com/luizgseixas/Glitnir-Launcher/releases/latest)** (Windows)
+**[Baixar Glitnir Launcher](https://github.com/GlitnirBr/Glitnir-Launcher/releases/latest)** (Windows)
 
 Acesse a página de Releases e baixe o arquivo `.exe` mais recente.
 
