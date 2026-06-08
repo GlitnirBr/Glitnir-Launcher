@@ -1,6 +1,6 @@
 {
   "name": "glitnir-launcher",
-  "version": "1.0.0",
+  "version": "1.0.12",
   "description": "Launcher oficial do servidor Glitnir - Valheim",
   "author": "GlitnirBr",
   "main": "dist-electron/main.js",
