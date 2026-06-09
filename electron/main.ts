@@ -80,7 +80,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     frame: false,
-    backgroundColor: '#3d8ab8',
+    backgroundColor: '#0d1520',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

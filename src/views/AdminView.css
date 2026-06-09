@@ -307,6 +307,11 @@
   background: rgba(255,255,255,0.05);
 }
 
+.ts-mod-icon-placeholder {
+  background: rgba(58, 123, 213, 0.1);
+  border: 1px solid var(--border-color);
+}
+
 .ts-mod-info {
   display: flex;
   flex-direction: column;

@@ -3,6 +3,7 @@ import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
 import { fetchModpackFromUrl, buildModpackRawUrl } from '../utils/modManager'
 import { getAdminModpack, publishModpack } from '../utils/backendApi'
+import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
 
 interface Props {
@@ -88,7 +89,7 @@ export default function AdminView({ config, adminToken, onSave }: Props) {
     if (allMods.length > 0) return
     setLoadingMods(true)
     fetchAllMods()
-      .then(mods => setAllMods(mods.filter(m => !m.is_deprecated)))
+      .then(mods => setAllMods(mods.filter(m => !m.is_deprecated && m.latest != null)))
       .catch(() => {})
       .finally(() => setLoadingMods(false))
   }, [activeTab, allMods.length])
@@ -332,72 +333,79 @@ export default function AdminView({ config, adminToken, onSave }: Props) {
               <h3>Mods do Thunderstore</h3>
             </div>
             <div className="card-body">
-              <div className="ts-filters">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Filtrar por nome, autor ou descrição..."
-                  className="ts-search-input"
-                />
-                <select
-                  value={categoryFilter}
-                  onChange={e => setCategoryFilter(e.target.value)}
-                  className="ts-select"
-                >
-                  <option value="">Todas categorias</option>
-                  {availableCategories.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-                <select
-                  value={sortBy}
-                  onChange={e => setSortBy(e.target.value as typeof sortBy)}
-                  className="ts-select"
-                >
-                  <option value="downloads">+ Downloads</option>
-                  <option value="rating">+ Avaliações</option>
-                  <option value="updated">Mais recentes</option>
-                  <option value="name">Nome A-Z</option>
-                </select>
-              </div>
-              <p className="ts-result-count text-muted">
-                {loadingMods ? 'Carregando...' : `Mostrando ${filteredMods.length} de ${allMods.length} mods`}
-              </p>
-              {loadingMods ? (
-                <p className="text-muted" style={{ textAlign: 'center', padding: '24px 0' }}>Carregando mods...</p>
-              ) : (
-                <div className="ts-mod-list">
-                  {filteredMods.map(mod => {
-                    const already = modpackMods.some(m => m.source === 'thunderstore' && m.namespace === mod.owner && m.name === mod.name)
-                    return (
-                      <div key={mod.full_name} className={`ts-mod-item ${already ? 'ts-mod-added' : ''}`}>
-                        <img
-                          className="ts-mod-icon"
-                          src={mod.latest.icon}
-                          alt={mod.name}
-                          onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-                        />
-                        <div className="ts-mod-info">
-                          <span className="ts-mod-name">{mod.name}</span>
-                          <span className="ts-mod-meta">
-                            {mod.owner} · v{mod.latest.version_number} · ↓ {mod.total_downloads.toLocaleString()}
-                          </span>
-                          <span className="ts-mod-desc">{mod.latest.description?.slice(0, 80)}</span>
-                        </div>
-                        <button
-                          className={already ? 'btn-ghost' : 'btn-secondary'}
-                          style={{ flexShrink: 0, fontSize: 13 }}
-                          onClick={() => handleAddThunderstoreMod(mod)}
-                          disabled={already}
-                        >
-                          {already ? '✓ Adicionado' : '+ Adicionar'}
-                        </button>
-                      </div>
-                    )
-                  })}
+              <ErrorBoundary>
+                <div className="ts-filters">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Filtrar por nome, autor ou descrição..."
+                    className="ts-search-input"
+                  />
+                  <select
+                    value={categoryFilter}
+                    onChange={e => setCategoryFilter(e.target.value)}
+                    className="ts-select"
+                  >
+                    <option value="">Todas categorias</option>
+                    {availableCategories.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={sortBy}
+                    onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                    className="ts-select"
+                  >
+                    <option value="downloads">+ Downloads</option>
+                    <option value="rating">+ Avaliações</option>
+                    <option value="updated">Mais recentes</option>
+                    <option value="name">Nome A-Z</option>
+                  </select>
                 </div>
-              )}
+                <p className="ts-result-count text-muted">
+                  {loadingMods ? 'Carregando...' : `Mostrando ${filteredMods.length} de ${allMods.length} mods`}
+                </p>
+                {loadingMods ? (
+                  <p className="text-muted" style={{ textAlign: 'center', padding: '24px 0' }}>Carregando mods...</p>
+                ) : (
+                  <div className="ts-mod-list">
+                    {filteredMods.map(mod => {
+                      if (!mod.latest) return null
+                      const already = modpackMods.some(m => m.source === 'thunderstore' && m.namespace === mod.owner && m.name === mod.name)
+                      return (
+                        <div key={mod.full_name} className={`ts-mod-item ${already ? 'ts-mod-added' : ''}`}>
+                          {mod.latest.icon ? (
+                            <img
+                              className="ts-mod-icon"
+                              src={mod.latest.icon}
+                              alt={mod.name}
+                              onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                            />
+                          ) : (
+                            <div className="ts-mod-icon ts-mod-icon-placeholder" />
+                          )}
+                          <div className="ts-mod-info">
+                            <span className="ts-mod-name">{mod.name}</span>
+                            <span className="ts-mod-meta">
+                              {mod.owner} · v{mod.latest.version_number} · ↓ {mod.total_downloads.toLocaleString()}
+                            </span>
+                            <span className="ts-mod-desc">{mod.latest.description?.slice(0, 80)}</span>
+                          </div>
+                          <button
+                            className={already ? 'btn-ghost' : 'btn-secondary'}
+                            style={{ flexShrink: 0, fontSize: 13 }}
+                            onClick={() => handleAddThunderstoreMod(mod)}
+                            disabled={already}
+                          >
+                            {already ? '✓ Adicionado' : '+ Adicionar'}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </ErrorBoundary>
             </div>
           </div>
 
