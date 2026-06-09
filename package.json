@@ -14,7 +14,8 @@
     "productName": "Glitnir Launcher",
     "win": {
       "target": "nsis",
-      "icon": "src/assets/icon.ico"
+      "icon": "src/assets/icon.ico",
+      "artifactName": "GlitnirLauncher-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": true,

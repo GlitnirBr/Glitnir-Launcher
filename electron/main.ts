@@ -99,42 +99,43 @@ function createWindow() {
 app.whenReady().then(() => {
   const win = createWindow()
 
-  // Auto-updater setup
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
+  // Auto-updater — only runs in packaged builds
+  if (app.isPackaged) {
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
 
-  autoUpdater.on('update-available', () => {
-    win.webContents.send('updater:status', { status: 'available' })
-  })
-
-  autoUpdater.on('download-progress', (info) => {
-    win.webContents.send('updater:progress', {
-      percent: Math.round(info.percent),
-      transferred: info.transferred,
-      total: info.total,
+    autoUpdater.on('update-available', () => {
+      win.webContents.send('updater:status', { status: 'available' })
     })
-  })
 
-  autoUpdater.on('update-downloaded', () => {
-    win.webContents.send('updater:status', { status: 'downloaded' })
-  })
+    autoUpdater.on('download-progress', (info) => {
+      win.webContents.send('updater:progress', {
+        percent: Math.round(info.percent),
+        transferred: info.transferred,
+        total: info.total,
+      })
+    })
 
-  autoUpdater.on('error', (err) => {
-    console.error('Auto-updater error:', err)
-    win.webContents.send('updater:status', { status: 'error', message: err.message })
-  })
+    autoUpdater.on('update-downloaded', () => {
+      win.webContents.send('updater:status', { status: 'downloaded' })
+    })
 
-  // Check for updates after 3 seconds
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(() => {})
-  }, 3000)
+    autoUpdater.on('error', (err) => {
+      console.error('Auto-updater error:', err)
+      win.webContents.send('updater:status', { status: 'error', message: err.message })
+    })
+
+    setTimeout(() => {
+      autoUpdater.checkForUpdates().catch(() => {})
+    }, 3000)
+  }
 
   ipcMain.handle('updater:check', () => {
-    autoUpdater.checkForUpdates().catch(() => {})
+    if (app.isPackaged) autoUpdater.checkForUpdates().catch(() => {})
   })
 
   ipcMain.handle('updater:install', () => {
-    autoUpdater.quitAndInstall()
+    if (app.isPackaged) autoUpdater.quitAndInstall()
   })
 
   ipcMain.on('window:minimize', () => win.minimize())

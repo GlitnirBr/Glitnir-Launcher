@@ -10,8 +10,8 @@ import { NewsItem } from './components/News'
 import './App.css'
 
 const VANILLA: ModpackEntry = { id: 'vanilla', name: 'Vanilla', type: 'vanilla', builtin: true }
-const MAIN: ModpackEntry = { id: 'principal', name: 'Servidor Principal', type: 'public' }
-const ADMIN_TEST: ModpackEntry = { id: 'admin-teste', name: 'Teste Admin', type: 'admin' }
+const MAIN: ModpackEntry = { id: 'principal', name: 'Glitnir', type: 'public' }
+const ADMIN_TEST: ModpackEntry = { id: 'admin-teste', name: 'Glitnir Admin', type: 'admin' }
 
 interface NewsData {
   featured?: {

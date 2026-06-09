@@ -40,10 +40,16 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           gh release create $tag --title $tag --notes "Release $tag" || true
+
+          # latest.yml é obrigatório para o auto-updater funcionar
           gh release upload $tag "release\latest.yml" --clobber
+
+          # .exe installer
           Get-ChildItem release -Filter "*.exe" | ForEach-Object {
             gh release upload $tag $_.FullName --clobber
           }
+
+          # .blockmap é necessário para atualização delta (reduz tamanho do download)
           Get-ChildItem release -Filter "*.blockmap" | ForEach-Object {
             gh release upload $tag $_.FullName --clobber
           }
