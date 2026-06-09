@@ -103,6 +103,9 @@ declare global {
       shell: {
         openExternal: (url: string) => void
       }
+      thunderstore: {
+        fetchAll: () => Promise<any[]>
+      }
       updater: {
         check: () => Promise<void>
         install: () => Promise<void>

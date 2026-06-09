@@ -259,6 +259,12 @@ app.whenReady().then(() => {
     shell.openExternal(url)
   })
 
+  ipcMain.handle('thunderstore:fetchAll', async () => {
+    const res = await fetch('https://thunderstore.io/c/valheim/api/v1/package/')
+    if (!res.ok) throw new Error(`Thunderstore HTTP ${res.status}`)
+    return res.json()
+  })
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

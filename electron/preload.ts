@@ -41,6 +41,10 @@ contextBridge.exposeInMainWorld('glitnir', {
     openExternal: (url: string) => ipcRenderer.send('shell:openExternal', url),
   },
 
+  thunderstore: {
+    fetchAll: () => ipcRenderer.invoke('thunderstore:fetchAll'),
+  },
+
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
     install: () => ipcRenderer.invoke('updater:install'),

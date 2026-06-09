@@ -29,6 +29,7 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
   const [categoryFilter, setCategoryFilter] = useState('')
   const [allMods, setAllMods] = useState<ThunderstoreMod[]>([])
   const [loadingMods, setLoadingMods] = useState(false)
+  const [modsError, setModsError] = useState('')
 
   const [privName, setPrivName] = useState('')
   const [privFilename, setPrivFilename] = useState('')
@@ -78,9 +79,10 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
   useEffect(() => {
     if (allMods.length > 0) return
     setLoadingMods(true)
+    setModsError('')
     fetchAllMods()
       .then(mods => setAllMods(mods.filter(m => !m.is_deprecated && m.latest != null)))
-      .catch(() => {})
+      .catch((err: any) => setModsError(err?.message || 'Erro ao carregar mods do Thunderstore'))
       .finally(() => setLoadingMods(false))
   }, [allMods.length])
 
@@ -283,6 +285,20 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
                 <p className="ts-result-count text-muted">
                   {loadingMods ? 'Carregando...' : `Mostrando ${filteredMods.length} de ${allMods.length} mods`}
                 </p>
+                {modsError && (
+                  <div className="error-banner" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ flex: 1 }}>{modsError}</span>
+                    <button className="btn-secondary" style={{ fontSize: 13 }} onClick={() => {
+                      setAllMods([])
+                      setModsError('')
+                      setLoadingMods(true)
+                      fetchAllMods()
+                        .then(mods => setAllMods(mods.filter(m => !m.is_deprecated && m.latest != null)))
+                        .catch((err: any) => setModsError(err?.message || 'Erro ao carregar mods'))
+                        .finally(() => setLoadingMods(false))
+                    }}>Tentar novamente</button>
+                  </div>
+                )}
                 {loadingMods ? (
                   <p className="text-muted" style={{ textAlign: 'center', padding: '24px 0' }}>Carregando mods...</p>
                 ) : (

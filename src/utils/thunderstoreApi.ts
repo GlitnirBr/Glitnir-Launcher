@@ -25,11 +25,9 @@ export interface ThunderstoreMod {
   }
 }
 
-const THUNDERSTORE_API = 'https://thunderstore.io/c/valheim/api/v1/package/'
-
 let cachedMods: ThunderstoreMod[] | null = null
 let cacheTime: number = 0
-const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+const CACHE_DURATION = 5 * 60 * 1000
 
 export async function fetchAllMods(): Promise<ThunderstoreMod[]> {
   const now = Date.now()
@@ -37,9 +35,16 @@ export async function fetchAllMods(): Promise<ThunderstoreMod[]> {
     return cachedMods
   }
 
-  const res = await fetch(THUNDERSTORE_API)
-  if (!res.ok) throw new Error('Falha ao buscar mods do Thunderstore')
+  // Use IPC when running inside Electron (avoids CORS/CSP restrictions)
+  const w = window as any
+  if (w?.glitnir?.thunderstore?.fetchAll) {
+    cachedMods = await w.glitnir.thunderstore.fetchAll()
+    cacheTime = now
+    return cachedMods!
+  }
 
+  const res = await fetch('https://thunderstore.io/c/valheim/api/v1/package/')
+  if (!res.ok) throw new Error(`Thunderstore HTTP ${res.status}`)
   cachedMods = await res.json()
   cacheTime = now
   return cachedMods!
