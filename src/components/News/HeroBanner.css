@@ -43,12 +43,13 @@
 }
 
 .hero-title {
+  font-family: var(--font-display);
   font-size: 34px;
-  font-weight: 800;
+  font-weight: 700;
   color: #fff;
   margin: 0 0 8px;
   line-height: 1.15;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.04em;
   text-shadow: 0 2px 16px rgba(0, 0, 0, 0.6);
 }
 
