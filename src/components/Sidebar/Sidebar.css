@@ -164,7 +164,7 @@
   cursor: pointer;
   transition: all 0.15s ease;
 }
-.sidebar-footer .dropdown-trigger:hover { border-color: var(--border-light); }
+.sidebar-footer .dropdown-trigger:hover { border-color: var(--border-medium); }
 
 .dropdown-arrow { width: 16px; height: 16px; color: var(--text-muted); }
 

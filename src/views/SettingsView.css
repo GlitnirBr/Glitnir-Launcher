@@ -3,12 +3,24 @@
   flex-direction: column;
   gap: 28px;
   max-width: 750px;
-  padding: 24px;
+  padding: 28px;
+}
+
+.settings-header {
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .settings-header h1 {
   font-size: 26px;
   margin: 0 0 6px;
+  color: var(--text-primary);
+}
+
+.settings-header p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
 }
 
 .settings-section .card-header h3 {
@@ -18,8 +30,25 @@
 .setting-description {
   font-size: 14px;
   color: var(--text-secondary);
-  margin: 0 0 18px;
-  line-height: 1.5;
+  margin: 0 0 20px;
+  line-height: 1.6;
+}
+
+.setting-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.setting-row:last-child { border-bottom: none; padding-bottom: 0; }
+
+.setting-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
 }
 
 .path-input-group {
@@ -35,4 +64,5 @@
 .settings-actions {
   display: flex;
   justify-content: flex-end;
+  padding-top: 4px;
 }

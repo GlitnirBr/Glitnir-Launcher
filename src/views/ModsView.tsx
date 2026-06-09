@@ -135,7 +135,7 @@ export default function ModsView({
       <div className="mods-list card">
         <div className="card-header">
           <h3>Lista de Mods</h3>
-          <span className="text-muted">{mods.length} mods</span>
+          <span className="mod-count">{mods.length} mods</span>
         </div>
         <div className="card-body">
           {mods.length === 0 && (

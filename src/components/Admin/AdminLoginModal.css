@@ -1,7 +1,7 @@
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(10, 50, 80, 0.85);
+  background: rgba(5, 14, 25, 0.88);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -10,30 +10,29 @@
 }
 
 .modal-box {
-  background: linear-gradient(180deg, rgba(20, 70, 110, 0.95) 0%, rgba(15, 55, 90, 0.95) 100%);
-  border: 1px solid var(--border-light);
+  background: linear-gradient(180deg, #131f30 0%, #0e1925 100%);
+  border: 1px solid var(--border-medium);
   border-radius: var(--radius-lg);
   padding: 32px 36px;
   width: 380px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  box-shadow: var(--shadow-lg), var(--shadow-glow);
-  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-lg), 0 0 40px rgba(58,123,213,0.25);
 }
 
 .modal-box h3 {
-  color: var(--accent-cyan);
+  color: var(--text-primary);
   font-size: 20px;
   font-weight: 700;
   margin: 0;
-  text-shadow: 0 0 15px rgba(94, 232, 255, 0.4);
 }
 
 .modal-box p {
   color: var(--text-secondary);
   font-size: 14px;
   margin: 0;
+  line-height: 1.55;
 }
 
 .modal-box form {
@@ -69,33 +68,34 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.18s ease;
 }
 
 .btn-cancel:hover {
   color: var(--text-primary);
-  border-color: var(--border-light);
-  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--border-medium);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .btn-confirm {
   padding: 12px 24px;
   font-size: 14px;
   font-weight: 700;
-  color: #003344;
-  background: linear-gradient(180deg, #7af4ff 0%, var(--accent-cyan) 100%);
-  border: none;
+  color: #fff;
+  background: linear-gradient(175deg, var(--accent-blue-hover) 0%, var(--accent-blue) 100%);
+  border: 1px solid rgba(255,255,255,0.15);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: var(--shadow-glow);
+  transition: all 0.18s ease;
+  box-shadow: 0 4px 16px rgba(58,123,213,0.35);
 }
 
 .btn-confirm:hover:not(:disabled) {
-  background: linear-gradient(180deg, #a0f8ff 0%, var(--accent-cyan-hover) 100%);
+  background: linear-gradient(175deg, #6aabff 0%, var(--accent-blue-hover) 100%);
+  box-shadow: 0 6px 22px rgba(58,123,213,0.45);
 }
 
 .btn-confirm:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
