@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Layout from './components/Layout/Layout'
 import AdminLoginModal from './components/Admin/AdminLoginModal'
 import UpdateNotification from './components/UpdateNotification/UpdateNotification'
-import { HomeView, ModsView, SettingsView, AdminView } from './views'
+import { HomeView, ModsView, SettingsView, AdminView, ModpackEditorView } from './views'
 import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated } from './utils/modManager'
 import { getAdminModpack, resolvePrivateMod } from './utils/backendApi'
 import { Config, Modpack, Mod, ModpackEntry } from './types'
@@ -286,6 +286,13 @@ export default function App() {
           <SettingsView
             config={config}
             onSave={handleSaveConfig}
+          />
+        )}
+
+        {currentView === 'modpack-editor' && isAdmin && config && (
+          <ModpackEditorView
+            config={config}
+            adminToken={adminToken}
           />
         )}
 
