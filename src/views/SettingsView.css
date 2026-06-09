@@ -3,6 +3,7 @@
   flex-direction: column;
   gap: 28px;
   max-width: 750px;
+  padding: 24px;
 }
 
 .settings-header h1 {

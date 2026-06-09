@@ -1,42 +1,55 @@
 .pinned-alert {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 18px;
-  background: rgba(255, 208, 102, 0.15);
-  border: 1px solid rgba(255, 208, 102, 0.35);
-  border-radius: var(--radius-md);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 0 20px rgba(255, 208, 102, 0.1);
-}
-
-.pinned-alert-icon {
+  gap: 12px;
+  padding: 11px 18px;
+  background: rgba(58, 123, 213, 0.1);
+  border-bottom: 1px solid rgba(58, 123, 213, 0.2);
+  border-top: 1px solid rgba(58, 123, 213, 0.15);
   flex-shrink: 0;
 }
 
+.pinned-alert-icon { flex-shrink: 0; }
 .pinned-alert-icon svg {
-  width: 22px;
-  height: 22px;
-  color: var(--accent-gold);
-  filter: drop-shadow(0 0 8px rgba(255, 208, 102, 0.4));
+  width: 16px;
+  height: 16px;
+  color: var(--accent-blue-hover);
+}
+
+.pinned-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent-blue-hover);
+  flex-shrink: 0;
 }
 
 .pinned-alert-content {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  min-width: 0;
 }
 
 .pinned-alert-title {
-  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.pinned-alert-meta {
-  font-size: 13px;
-  color: var(--text-secondary);
+.pinned-alert-sep { color: var(--text-muted); flex-shrink: 0; }
+
+.pinned-alert-summary {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pinned-alert-dismiss {
@@ -44,8 +57,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   background: transparent;
   border: none;
@@ -53,17 +66,6 @@
   cursor: pointer;
   transition: background 0.15s ease;
 }
-
-.pinned-alert-dismiss svg {
-  width: 18px;
-  height: 18px;
-  color: var(--text-muted);
-}
-
-.pinned-alert-dismiss:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.pinned-alert-dismiss:hover svg {
-  color: var(--text-primary);
-}
+.pinned-alert-dismiss svg { width: 14px; height: 14px; color: var(--text-muted); }
+.pinned-alert-dismiss:hover { background: rgba(255, 255, 255, 0.07); }
+.pinned-alert-dismiss:hover svg { color: var(--text-secondary); }

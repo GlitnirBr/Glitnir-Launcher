@@ -1,19 +1,15 @@
 .titlebar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   height: var(--titlebar-height);
   min-height: var(--titlebar-height);
-  background: rgba(10, 40, 70, 0.8);
+  background: rgba(8, 14, 22, 0.9);
   border-bottom: 1px solid var(--border-color);
-  backdrop-filter: blur(15px);
   -webkit-app-region: drag;
   user-select: none;
 }
 
-.titlebar-drag {
-  flex: 1;
-}
+.titlebar-drag { flex: 1; }
 
 .titlebar-right {
   display: flex;
@@ -24,21 +20,21 @@
 .titlebar-user {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 16px;
+  gap: 8px;
+  padding: 0 8px 0 16px;
 }
 
-.admin-badge {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 4px 10px;
-  background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-cyan-dark) 100%);
-  color: #003344;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(94, 232, 255, 0.3);
+.user-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: rgba(58, 123, 213, 0.25);
+  border: 1px solid rgba(58, 123, 213, 0.4);
+  border-radius: 50%;
 }
+.user-avatar svg { width: 13px; height: 13px; color: var(--accent-blue-hover); }
 
 .user-name {
   font-size: 13px;
@@ -46,43 +42,47 @@
   color: var(--text-secondary);
 }
 
+.admin-badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  background: rgba(58, 123, 213, 0.2);
+  color: var(--accent-blue-hover);
+  border: 1px solid rgba(58, 123, 213, 0.35);
+  border-radius: 3px;
+}
+
 .btn-admin {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
 }
+.btn-admin svg { width: 15px; height: 15px; color: var(--text-muted); }
+.btn-admin:hover { background: rgba(255, 255, 255, 0.07); }
+.btn-admin:hover svg { color: var(--text-secondary); }
 
-.btn-admin svg {
-  width: 18px;
+.titlebar-sep {
+  width: 1px;
   height: 18px;
-  color: var(--text-muted);
+  background: var(--border-color);
+  margin: 0 4px;
 }
 
-.btn-admin:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.btn-admin:hover svg {
-  color: var(--accent-cyan);
-}
-
-.titlebar-controls {
-  display: flex;
-}
-
+.titlebar-controls { display: flex; }
 .control-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 50px;
+  width: 46px;
   height: var(--titlebar-height);
   padding: 0;
   background: transparent;
@@ -90,25 +90,8 @@
   cursor: pointer;
   transition: background 0.15s ease;
 }
-
-.control-btn svg {
-  width: 15px;
-  height: 15px;
-  color: var(--text-muted);
-}
-
-.control-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.control-btn:hover svg {
-  color: var(--text-primary);
-}
-
-.control-btn.close:hover {
-  background: #e04050;
-}
-
-.control-btn.close:hover svg {
-  color: white;
-}
+.control-btn svg { width: 13px; height: 13px; color: var(--text-muted); }
+.control-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.control-btn:hover svg { color: var(--text-primary); }
+.control-btn.close:hover { background: #c0263a; }
+.control-btn.close:hover svg { color: #fff; }

@@ -13,84 +13,108 @@ export default function UpdateNotification() {
   const [slowTimeout, setSlowTimeout] = useState(false)
 
   useEffect(() => {
-    window.glitnir.updater.onStatus((data) => {
+    let slowTimer: ReturnType<typeof setTimeout> | null = null
+
+    function handleStatus(data: { status: string }) {
       if (data.status === 'available') {
         setStatus('available')
-        const t = setTimeout(() => setSlowTimeout(true), 10000)
-        return () => clearTimeout(t)
+        slowTimer = setTimeout(() => setSlowTimeout(true), 10000)
       } else if (data.status === 'downloaded') {
         setStatus('downloaded')
+        if (slowTimer) clearTimeout(slowTimer)
       } else if (data.status === 'error') {
         setStatus('error')
         setErrorMsg((data as any).message || 'Erro desconhecido')
+        if (slowTimer) clearTimeout(slowTimer)
       }
-    })
-    window.glitnir.updater.onProgress((data) => {
+    }
+
+    function handleProgress(data: { percent: number; transferred: number; total: number }) {
       setSlowTimeout(false)
       setProgress(data)
-    })
+    }
+
+    window.glitnir.updater.onStatus(handleStatus)
+    window.glitnir.updater.onProgress(handleProgress)
+
+    return () => {
+      if (slowTimer) clearTimeout(slowTimer)
+    }
   }, [])
 
   if (!status) return null
 
   return (
-    <div className="update-notification">
-      <div className="update-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <polyline points="7,10 12,15 17,10" />
-          <line x1="12" y1="15" x2="12" y2="3" />
-        </svg>
+    <div className="update-bar">
+      <div className={`update-bar-icon ${status === 'error' ? 'error' : ''}`}>
+        {status === 'error' ? (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7,10 12,15 17,10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+        )}
       </div>
 
-      <div className="update-content">
+      <div className="update-bar-info">
         {status === 'available' && (
           <>
-            <span className="update-title">Atualização disponível</span>
+            <span className="update-bar-label">Baixando atualização...</span>
             {progress ? (
-              <>
-                <div className="update-progress-bar">
-                  <div className="update-progress-fill" style={{ width: `${progress.percent}%` }} />
+              <div className="update-bar-progress">
+                <div className="update-bar-track">
+                  <div className="update-bar-fill" style={{ width: `${progress.percent}%` }} />
                 </div>
-                <span className="update-desc">
-                  {progress.percent}% — {formatBytes(progress.transferred)} / {formatBytes(progress.total)}
+                <span className="update-bar-stats">
+                  {formatBytes(progress.transferred)} / {formatBytes(progress.total)}
                 </span>
-              </>
+              </div>
             ) : (
-              <span className="update-desc">
-                {slowTimeout ? 'Download lento, aguarde...' : 'Preparando download...'}
+              <span className="update-bar-desc">
+                {slowTimeout ? 'Download lento, aguarde...' : 'Preparando...'}
               </span>
             )}
           </>
         )}
+
         {status === 'downloaded' && (
           <>
-            <span className="update-title">Atualização pronta!</span>
-            <span className="update-desc">Clique para reiniciar e aplicar.</span>
+            <span className="update-bar-label">Atualização pronta!</span>
+            <span className="update-bar-desc">Reinicie para aplicar.</span>
           </>
         )}
+
         {status === 'error' && (
           <>
-            <span className="update-title" style={{ color: '#ff6b6b' }}>Erro na atualização</span>
-            <span className="update-desc" title={errorMsg}>Não foi possível baixar.</span>
+            <span className="update-bar-label error">Falha na atualização</span>
+            <span className="update-bar-desc" title={errorMsg}>
+              {errorMsg.length > 80 ? errorMsg.slice(0, 80) + '…' : errorMsg}
+            </span>
           </>
         )}
       </div>
 
-      {status === 'downloaded' && (
-        <button className="update-btn" onClick={() => window.glitnir.updater.install()}>
-          Reiniciar
-        </button>
-      )}
-
-      {(status === 'downloaded' || status === 'error') && (
-        <button className="update-close" onClick={() => setStatus(null)}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="6" y1="6" x2="18" y2="18" />
-            <line x1="6" y1="18" x2="18" y2="6" />
-          </svg>
-        </button>
-      )}
+      <div className="update-bar-actions">
+        {status === 'downloaded' && (
+          <button className="update-bar-btn" onClick={() => window.glitnir.updater.install()}>
+            Reiniciar
+          </button>
+        )}
+        {(status === 'downloaded' || status === 'error') && (
+          <button className="update-bar-close" onClick={() => setStatus(null)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="6" y1="6" x2="18" y2="18" />
+              <line x1="6" y1="18" x2="18" y2="6" />
+            </svg>
+          </button>
+        )}
+      </div>
     </div>
   )
 }

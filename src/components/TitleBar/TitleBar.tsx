@@ -14,8 +14,14 @@ export default function TitleBar({ isAdmin, onAdminClick, username }: Props) {
       <div className="titlebar-right">
         <div className="titlebar-user">
           {isAdmin && <span className="admin-badge">Admin</span>}
+          <div className="user-avatar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+          </div>
           <span className="user-name">{username}</span>
-          <button className="btn-admin" onClick={onAdminClick}>
+          <button className="btn-admin" onClick={onAdminClick} title={isAdmin ? 'Sair do admin' : 'Login admin'}>
             {isAdmin ? (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -30,6 +36,8 @@ export default function TitleBar({ isAdmin, onAdminClick, username }: Props) {
           </button>
         </div>
 
+        <div className="titlebar-sep" />
+
         <div className="titlebar-controls">
           <button className="control-btn" onClick={() => window.glitnir.window.minimize()}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -38,11 +46,11 @@ export default function TitleBar({ isAdmin, onAdminClick, username }: Props) {
           </button>
           <button className="control-btn" onClick={() => window.glitnir.window.maximize()}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="5" y="5" width="14" height="14" rx="2" />
+              <rect x="5" y="5" width="14" height="14" rx="1.5" />
             </svg>
           </button>
           <button className="control-btn close" onClick={() => window.glitnir.window.close()}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <line x1="6" y1="6" x2="18" y2="18" />
               <line x1="6" y1="18" x2="18" y2="6" />
             </svg>

@@ -9,6 +9,7 @@ export interface ThunderstoreMod {
   is_pinned: boolean
   is_deprecated: boolean
   total_downloads: number
+  categories: string[]
   latest: {
     name: string
     full_name: string

@@ -45,10 +45,14 @@ contextBridge.exposeInMainWorld('glitnir', {
     check: () => ipcRenderer.invoke('updater:check'),
     install: () => ipcRenderer.invoke('updater:install'),
     onStatus: (callback: (data: { status: string }) => void) => {
-      ipcRenderer.on('updater:status', (_e, data) => callback(data))
+      const handler = (_e: Electron.IpcRendererEvent, data: { status: string }) => callback(data)
+      ipcRenderer.removeAllListeners('updater:status')
+      ipcRenderer.on('updater:status', handler)
     },
     onProgress: (callback: (data: { percent: number; transferred: number; total: number }) => void) => {
-      ipcRenderer.on('updater:progress', (_e, data) => callback(data))
+      const handler = (_e: Electron.IpcRendererEvent, data: { percent: number; transferred: number; total: number }) => callback(data)
+      ipcRenderer.removeAllListeners('updater:progress')
+      ipcRenderer.on('updater:progress', handler)
     },
   },
 })

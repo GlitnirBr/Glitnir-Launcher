@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
-import { searchMods, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
+import { fetchAllMods, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
 import { fetchModpackFromUrl, buildModpackRawUrl } from '../utils/modManager'
 import { getAdminModpack, publishModpack } from '../utils/backendApi'
 import './AdminView.css'
@@ -31,8 +31,10 @@ export default function AdminView({ config, adminToken, onSave }: Props) {
   const [modpackConfigs, setModpackConfigs] = useState<ModConfig[]>([])
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<ThunderstoreMod[]>([])
-  const [searching, setSearching] = useState(false)
+  const [sortBy, setSortBy] = useState<'downloads' | 'rating' | 'updated' | 'name'>('downloads')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [allMods, setAllMods] = useState<ThunderstoreMod[]>([])
+  const [loadingMods, setLoadingMods] = useState(false)
 
   // Private mod form
   const [privName, setPrivName] = useState('')
@@ -81,6 +83,43 @@ export default function AdminView({ config, adminToken, onSave }: Props) {
     if (activeTab === 'modpack' || activeTab === 'configs') loadModpackForEdit()
   }, [activeTab, loadModpackForEdit])
 
+  useEffect(() => {
+    if (activeTab !== 'modpack') return
+    if (allMods.length > 0) return
+    setLoadingMods(true)
+    fetchAllMods()
+      .then(mods => setAllMods(mods.filter(m => !m.is_deprecated)))
+      .catch(() => {})
+      .finally(() => setLoadingMods(false))
+  }, [activeTab, allMods.length])
+
+  const availableCategories = useMemo(() => {
+    const cats = new Set<string>()
+    allMods.forEach(m => (m.categories || []).forEach(c => cats.add(c)))
+    return Array.from(cats).sort()
+  }, [allMods])
+
+  const filteredMods = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim()
+    let source = allMods
+    if (q) {
+      source = source.filter(m =>
+        m.name.toLowerCase().includes(q) ||
+        m.owner.toLowerCase().includes(q) ||
+        m.latest.description?.toLowerCase().includes(q)
+      )
+    }
+    if (categoryFilter) {
+      source = source.filter(m => (m.categories || []).includes(categoryFilter))
+    }
+    const sorted = [...source]
+    if (sortBy === 'downloads') sorted.sort((a, b) => b.total_downloads - a.total_downloads)
+    else if (sortBy === 'rating') sorted.sort((a, b) => b.rating_score - a.rating_score)
+    else if (sortBy === 'updated') sorted.sort((a, b) => b.date_updated.localeCompare(a.date_updated))
+    else if (sortBy === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name))
+    return sorted.slice(0, 80)
+  }, [allMods, searchQuery, sortBy, categoryFilter])
+
   async function handleSaveConfig() {
     setSaving(true)
     setSaved(false)
@@ -96,19 +135,6 @@ export default function AdminView({ config, adminToken, onSave }: Props) {
     }
   }
 
-  async function handleSearch() {
-    if (!searchQuery.trim()) return
-    setSearching(true)
-    setError('')
-    try {
-      setSearchResults(await searchMods(searchQuery))
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setSearching(false)
-    }
-  }
-
   function handleAddThunderstoreMod(ts: ThunderstoreMod) {
     if (modpackMods.some(m => m.source === 'thunderstore' && m.namespace === ts.owner && m.name === ts.name)) return
     const mod: Mod = {
@@ -120,8 +146,6 @@ export default function AdminView({ config, adminToken, onSave }: Props) {
       description: ts.latest.description?.slice(0, 120),
     }
     setModpackMods([...modpackMods, mod])
-    setSearchResults([])
-    setSearchQuery('')
   }
 
   function handleAddPrivateMod() {
@@ -304,28 +328,70 @@ export default function AdminView({ config, adminToken, onSave }: Props) {
           </div>
 
           <div className="admin-section card">
-            <div className="card-header"><h3>Buscar Mods no Thunderstore</h3></div>
+            <div className="card-header">
+              <h3>Mods do Thunderstore</h3>
+            </div>
             <div className="card-body">
-              <div className="search-row">
-                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Digite o nome do mod..." onKeyDown={e => e.key === 'Enter' && handleSearch()} />
-                <button className="btn-secondary" onClick={handleSearch} disabled={searching}>
-                  {searching ? 'Buscando...' : 'Buscar'}
-                </button>
+              <div className="ts-filters">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Filtrar por nome, autor ou descrição..."
+                  className="ts-search-input"
+                />
+                <select
+                  value={categoryFilter}
+                  onChange={e => setCategoryFilter(e.target.value)}
+                  className="ts-select"
+                >
+                  <option value="">Todas categorias</option>
+                  {availableCategories.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <select
+                  value={sortBy}
+                  onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                  className="ts-select"
+                >
+                  <option value="downloads">+ Downloads</option>
+                  <option value="rating">+ Avaliações</option>
+                  <option value="updated">Mais recentes</option>
+                  <option value="name">Nome A-Z</option>
+                </select>
               </div>
-              {searchResults.length > 0 && (
-                <div className="search-results">
-                  {searchResults.map(mod => {
+              <p className="ts-result-count text-muted">
+                {loadingMods ? 'Carregando...' : `Mostrando ${filteredMods.length} de ${allMods.length} mods`}
+              </p>
+              {loadingMods ? (
+                <p className="text-muted" style={{ textAlign: 'center', padding: '24px 0' }}>Carregando mods...</p>
+              ) : (
+                <div className="ts-mod-list">
+                  {filteredMods.map(mod => {
                     const already = modpackMods.some(m => m.source === 'thunderstore' && m.namespace === mod.owner && m.name === mod.name)
                     return (
-                      <div key={mod.full_name} className="search-result-item">
-                        <div className="result-info">
-                          <span className="result-name">{mod.name}</span>
-                          <span className="result-owner">por {mod.owner}</span>
-                          <span className="result-version">v{mod.latest.version_number}</span>
+                      <div key={mod.full_name} className={`ts-mod-item ${already ? 'ts-mod-added' : ''}`}>
+                        <img
+                          className="ts-mod-icon"
+                          src={mod.latest.icon}
+                          alt={mod.name}
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
+                        <div className="ts-mod-info">
+                          <span className="ts-mod-name">{mod.name}</span>
+                          <span className="ts-mod-meta">
+                            {mod.owner} · v{mod.latest.version_number} · ↓ {mod.total_downloads.toLocaleString()}
+                          </span>
+                          <span className="ts-mod-desc">{mod.latest.description?.slice(0, 80)}</span>
                         </div>
-                        <button className="btn-ghost" onClick={() => handleAddThunderstoreMod(mod)} disabled={already}>
-                          {already ? 'Adicionado' : '+ Adicionar'}
+                        <button
+                          className={already ? 'btn-ghost' : 'btn-secondary'}
+                          style={{ flexShrink: 0, fontSize: 13 }}
+                          onClick={() => handleAddThunderstoreMod(mod)}
+                          disabled={already}
+                        >
+                          {already ? '✓ Adicionado' : '+ Adicionar'}
                         </button>
                       </div>
                     )

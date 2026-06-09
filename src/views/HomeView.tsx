@@ -17,35 +17,65 @@ interface Props {
 }
 
 export default function HomeView({ featured, news, pinnedAlert, onDismissAlert }: Props) {
+  const displayNews = news.slice(0, 3)
+
   return (
     <div className="home-view">
       <HeroBanner
         featured={featured}
         fallbackTitle="Glitnir Fantasy"
-        fallbackSubtitle="Servidor de Valheim com raças, classes e aventuras epicas. Junte-se a nos!"
+        fallbackSubtitle="Servidor de Valheim com raças, classes e aventuras épicas. Junte-se a nós!"
       />
 
       {pinnedAlert && (
         <PinnedAlert alert={pinnedAlert} onDismiss={onDismissAlert} />
       )}
 
-      {news.length > 0 && (
-        <section className="news-section">
-          <h2 className="section-title">Noticias do Servidor</h2>
-          <div className="news-grid">
-            {news.slice(0, 3).map(item => (
-              <NewsCard key={item.id} news={item} />
-            ))}
-          </div>
-        </section>
-      )}
+      <div className="home-content">
+        <div className="home-grid">
+          {/* News section */}
+          {displayNews.length > 0 && (
+            <section className="home-section">
+              <h2 className="section-title">Notícias do Servidor</h2>
+              <div className="news-grid">
+                {displayNews.map(item => (
+                  <NewsCard key={item.id} news={item} />
+                ))}
+              </div>
+            </section>
+          )}
 
-      {news.length === 0 && !featured && (
-        <div className="empty-state">
-          <p>Nenhuma novidade no momento.</p>
-          <span className="text-muted">Configure as noticias no painel admin.</span>
+          {/* Server status card */}
+          <aside className="server-status-card">
+            <div className="status-card-header">
+              <span className="status-card-title">Status do Servidor</span>
+            </div>
+            <div className="status-card-body">
+              <div className="status-indicator online">
+                <span className="status-dot" />
+                <span className="status-text">Online</span>
+              </div>
+              <div className="status-rows">
+                <div className="status-row">
+                  <span className="status-row-label">IP</span>
+                  <span className="status-row-value mono">glitnir.valheim.gg</span>
+                </div>
+                <div className="status-row">
+                  <span className="status-row-label">Jogadores</span>
+                  <span className="status-row-value">0 / 100</span>
+                </div>
+              </div>
+            </div>
+          </aside>
         </div>
-      )}
+
+        {displayNews.length === 0 && !featured && (
+          <div className="empty-state">
+            <p>Nenhuma novidade no momento.</p>
+            <span className="text-muted">Configure as notícias no painel admin.</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
