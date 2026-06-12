@@ -81,7 +81,7 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
     setLoadingMods(true)
     setModsError('')
     fetchAllMods()
-      .then(mods => setAllMods(mods.filter(m => !m.is_deprecated && m.latest != null)))
+      .then(mods => setAllMods(mods.filter(m => !m.is_deprecated)))
       .catch((err: any) => setModsError(err?.message || 'Erro ao carregar mods do Thunderstore'))
       .finally(() => setLoadingMods(false))
   }, [allMods.length])
@@ -293,7 +293,7 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
                       setModsError('')
                       setLoadingMods(true)
                       fetchAllMods()
-                        .then(mods => setAllMods(mods.filter(m => !m.is_deprecated && m.latest != null)))
+                        .then(mods => setAllMods(mods.filter(m => !m.is_deprecated)))
                         .catch((err: any) => setModsError(err?.message || 'Erro ao carregar mods'))
                         .finally(() => setLoadingMods(false))
                     }}>Tentar novamente</button>
