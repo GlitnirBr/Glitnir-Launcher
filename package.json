@@ -5,7 +5,7 @@
   "author": "GlitnirBr",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently -k --raw \"vite\" \"wait-on tcp:5173 && electron . --single-instance\"",
+    "dev": "vite",
     "build": "vite build && tsc -p tsconfig.electron.json && electron-builder",
     "preview": "vite preview"
   },

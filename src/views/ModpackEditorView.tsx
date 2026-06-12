@@ -300,7 +300,9 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
                   </div>
                 )}
                 {loadingMods ? (
-                  <p className="text-muted" style={{ textAlign: 'center', padding: '24px 0' }}>Carregando mods...</p>
+                  <p className="text-muted" style={{ textAlign: 'center', padding: '24px 0' }}>
+                    Carregando mods do Thunderstore... (pode demorar alguns segundos)
+                  </p>
                 ) : (
                   <div className="ts-mod-list">
                     {filteredMods.map(mod => {

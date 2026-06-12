@@ -260,9 +260,15 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('thunderstore:fetchAll', async () => {
-    const res = await fetch('https://thunderstore.io/c/valheim/api/v1/package/')
-    if (!res.ok) throw new Error(`Thunderstore HTTP ${res.status}`)
-    return res.json()
+    const axios = require('axios')
+    const response = await axios.get('https://thunderstore.io/c/valheim/api/v1/package/', {
+      timeout: 60000,
+      headers: { 'Accept-Encoding': 'gzip, deflate' },
+    })
+    if (!Array.isArray(response.data)) {
+      throw new Error('Resposta inesperada do Thunderstore')
+    }
+    return response.data
   })
 
   app.on('activate', () => {
