@@ -57,6 +57,10 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
   const [cfgFilename, setCfgFilename] = useState('')
   const [cfgInstallPath, setCfgInstallPath] = useState('')
   const [cfgContent, setCfgContent] = useState('')
+  // Discovered config files from the selected mod's zip
+  const configScanCache = useRef<Record<string, { filename: string; installPath: string; content: string }[]>>({})
+  const [cfgScanLoading, setCfgScanLoading] = useState(false)
+  const [cfgDiscoveredFiles, setCfgDiscoveredFiles] = useState<{ filename: string; installPath: string; content: string }[]>([])
 
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
@@ -302,6 +306,36 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
       return updated
     }))
   }
+
+  // Scan the selected mod's zip for config files whenever cfgMod changes
+  useEffect(() => {
+    if (!cfgMod) {
+      setCfgDiscoveredFiles([])
+      return
+    }
+    // Serve from cache if available
+    if (configScanCache.current[cfgMod]) {
+      setCfgDiscoveredFiles(configScanCache.current[cfgMod])
+      return
+    }
+    const mod = modpackMods.find(m => m.name === cfgMod)
+    if (!mod || mod.source !== 'thunderstore' || !mod.downloadUrl) {
+      setCfgDiscoveredFiles([])
+      return
+    }
+    const w = window as any
+    if (!w?.glitnir?.mods?.readConfigsFromZip) return
+    setCfgScanLoading(true)
+    setCfgDiscoveredFiles([])
+    w.glitnir.mods.readConfigsFromZip({ url: mod.downloadUrl })
+      .then((result: { success: boolean; configs?: { filename: string; installPath: string; content: string }[] }) => {
+        const files = result.success ? (result.configs ?? []) : []
+        configScanCache.current[cfgMod] = files
+        setCfgDiscoveredFiles(files)
+      })
+      .catch(() => setCfgDiscoveredFiles([]))
+      .finally(() => setCfgScanLoading(false))
+  }, [cfgMod, modpackMods])
 
   function handleAddConfig() {
     if (!cfgFilename.trim()) return
@@ -743,26 +777,88 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
             <div className="card-body">
               <div className="form-group">
                 <label>Mod relacionado</label>
-                <select value={cfgMod} onChange={e => setCfgMod(e.target.value)}>
+                <select
+                  value={cfgMod}
+                  onChange={e => {
+                    setCfgMod(e.target.value)
+                    setCfgFilename('')
+                    setCfgInstallPath('')
+                    setCfgContent('')
+                  }}
+                >
                   <option value="">— selecione —</option>
                   {modpackMods.map((m, i) => <option key={i} value={m.name}>{m.name}</option>)}
                 </select>
               </div>
-              <div className="form-group">
-                <label>Nome do arquivo</label>
-                <input type="text" value={cfgFilename} onChange={e => setCfgFilename(e.target.value)} placeholder="valheim_plus.cfg" />
-              </div>
-              <div className="form-group">
-                <label>Caminho de instalação</label>
-                <input type="text" value={cfgInstallPath} onChange={e => setCfgInstallPath(e.target.value)} placeholder="BepInEx/config/valheim_plus.cfg" />
-                <span className="form-hint">Relativo ao perfil. Vazio = BepInEx/config/&lt;arquivo&gt;.</span>
-              </div>
-              <div className="form-group">
-                <label>Conteúdo (texto literal ou URL http)</label>
-                <textarea value={cfgContent} onChange={e => setCfgContent(e.target.value)} rows={6}
-                  placeholder="# Conteúdo do config aqui, ou uma URL https para buscar" />
-              </div>
-              <button className="btn-secondary" onClick={handleAddConfig} disabled={!cfgFilename.trim()}>
+
+              {/* Config files discovered from the mod's zip */}
+              {cfgMod && (
+                <div className="cfg-file-picker form-group">
+                  <label>Arquivo de config</label>
+                  {cfgScanLoading && (
+                    <p className="text-muted" style={{ fontSize: 12, margin: '6px 0' }}>
+                      Verificando arquivos de config do mod...
+                    </p>
+                  )}
+                  {!cfgScanLoading && cfgDiscoveredFiles.length > 0 && (
+                    <div className="cfg-file-list">
+                      {cfgDiscoveredFiles.map(f => (
+                        <button
+                          key={f.filename}
+                          type="button"
+                          className={`cfg-file-option ${cfgFilename === f.filename ? 'active' : ''}`}
+                          onClick={() => {
+                            setCfgFilename(f.filename)
+                            setCfgInstallPath(f.installPath)
+                            setCfgContent(f.content)
+                          }}
+                        >
+                          <span className="cfg-file-name">{f.filename}</span>
+                          <span className="cfg-file-path text-muted">{f.installPath}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {!cfgScanLoading && cfgDiscoveredFiles.length === 0 && cfgMod && (
+                    <p className="text-muted" style={{ fontSize: 12, margin: '6px 0' }}>
+                      {modpackMods.find(m => m.name === cfgMod)?.source === 'private'
+                        ? 'Mods privados: insira o nome do arquivo manualmente abaixo.'
+                        : 'Nenhum arquivo .cfg encontrado no zip. Insira manualmente.'}
+                    </p>
+                  )}
+                  {/* Always allow manual override */}
+                  <input
+                    type="text"
+                    value={cfgFilename}
+                    onChange={e => setCfgFilename(e.target.value)}
+                    placeholder="ou digite o nome do arquivo..."
+                    style={{ marginTop: cfgDiscoveredFiles.length > 0 ? 8 : 0 }}
+                  />
+                </div>
+              )}
+
+              {cfgFilename && (
+                <>
+                  <div className="form-group">
+                    <label>Caminho de instalação</label>
+                    <input type="text" value={cfgInstallPath} onChange={e => setCfgInstallPath(e.target.value)} placeholder="BepInEx/config/valheim_plus.cfg" />
+                    <span className="form-hint">Relativo ao perfil. Vazio = BepInEx/config/&lt;arquivo&gt;.</span>
+                  </div>
+                  <div className="form-group">
+                    <label>Conteúdo</label>
+                    <textarea
+                      value={cfgContent}
+                      onChange={e => setCfgContent(e.target.value)}
+                      rows={8}
+                      className="cfg-edit-textarea"
+                      spellCheck={false}
+                      placeholder="# Conteúdo do arquivo, ou uma URL https:// para buscar na instalação"
+                    />
+                  </div>
+                </>
+              )}
+
+              <button className="btn-secondary" onClick={handleAddConfig} disabled={!cfgFilename.trim() || !cfgMod}>
                 + Adicionar Config
               </button>
             </div>
