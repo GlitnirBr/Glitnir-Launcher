@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
 import { fetchModpackFromUrl, buildModpackRawUrl } from '../utils/modManager'
-import { getAdminModpack, publishModpack } from '../utils/backendApi'
+import { getAdminModpack, publishModpack, uploadPrivateMod, listPrivateMods } from '../utils/backendApi'
 import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
 
@@ -44,6 +44,14 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
 
   const [privName, setPrivName] = useState('')
   const [privFilename, setPrivFilename] = useState('')
+  // Private mod upload / repo list
+  type PrivateModEntry = { filename: string; size: number; updatedAt: string }
+  const [repoMods, setRepoMods] = useState<PrivateModEntry[]>([])
+  const [repoLoading, setRepoLoading] = useState(false)
+  const [repoError, setRepoError] = useState('')
+  const [pendingFile, setPendingFile] = useState<{ filename: string; content: string; size: number } | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
 
   const [cfgMod, setCfgMod] = useState('')
   const [cfgFilename, setCfgFilename] = useState('')
@@ -217,6 +225,67 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
     }])
     setPrivName('')
     setPrivFilename('')
+  }
+
+  const loadRepoMods = useCallback(() => {
+    if (!adminToken) return
+    setRepoLoading(true)
+    setRepoError('')
+    listPrivateMods(adminToken, backendUrl)
+      .then(mods => setRepoMods(mods))
+      .catch((err: any) => setRepoError(err?.message || 'Erro ao listar mods privados'))
+      .finally(() => setRepoLoading(false))
+  }, [adminToken, backendUrl])
+
+  async function handlePickFile() {
+    const w = window as any
+    if (!w?.glitnir?.mods?.pickAndRead) return
+    const file = await w.glitnir.mods.pickAndRead()
+    if (!file) return
+    setPendingFile(file)
+    setUploadError('')
+    // Auto-fill name from filename (strip extension)
+    if (!privName.trim()) {
+      setPrivName(file.filename.replace(/\.(zip|dll)$/i, ''))
+    }
+    setPrivFilename(file.filename)
+  }
+
+  async function handleUploadAndAdd() {
+    if (!pendingFile || !adminToken) return
+    setUploading(true)
+    setUploadError('')
+    try {
+      await uploadPrivateMod(adminToken, pendingFile.filename, pendingFile.content, backendUrl)
+      // Add to modpack with the name filled in
+      const name = privName.trim() || pendingFile.filename.replace(/\.(zip|dll)$/i, '')
+      setModpackMods(prev => [...prev, {
+        name,
+        source: 'private',
+        filename: pendingFile.filename,
+        downloadUrl: `/mods/private/${pendingFile.filename}`,
+      }])
+      // Refresh repo list and reset form
+      setPendingFile(null)
+      setPrivName('')
+      setPrivFilename('')
+      loadRepoMods()
+    } catch (err: any) {
+      setUploadError(err?.message || 'Erro ao fazer upload')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function handleAddFromRepo(entry: PrivateModEntry) {
+    const name = entry.filename.replace(/\.(zip|dll)$/i, '')
+    if (modpackMods.some(m => m.source === 'private' && m.filename === entry.filename)) return
+    setModpackMods(prev => [...prev, {
+      name,
+      source: 'private',
+      filename: entry.filename,
+      downloadUrl: `/mods/private/${entry.filename}`,
+    }])
   }
 
   function handleRemoveMod(index: number) {
@@ -564,18 +633,96 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
             </div>
           </div>
 
-          {/* Private mod */}
+          {/* Private mods */}
           <div className="admin-section card">
-            <div className="card-header"><h3>Adicionar Mod Privado</h3></div>
+            <div className="card-header">
+              <h3>Mods Privados</h3>
+              <button
+                className="btn-ghost"
+                style={{ fontSize: 12 }}
+                onClick={loadRepoMods}
+                disabled={repoLoading}
+              >
+                {repoLoading ? 'Carregando...' : '↻ Listar do repo'}
+              </button>
+            </div>
             <div className="card-body">
-              <div className="search-row">
-                <input type="text" value={privName} onChange={e => setPrivName(e.target.value)} placeholder="Nome do mod" />
-                <input type="text" value={privFilename} onChange={e => setPrivFilename(e.target.value)} placeholder="arquivo.zip" />
-                <button className="btn-secondary" onClick={handleAddPrivateMod} disabled={!privName.trim() || !privFilename.trim()}>
-                  + Adicionar
-                </button>
+
+              {/* Upload new file */}
+              <div className="priv-upload-area">
+                <div className="priv-upload-row">
+                  <button className="btn-ghost priv-pick-btn" onClick={handlePickFile}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17,8 12,3 7,8"/>
+                      <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    Selecionar arquivo (.zip / .dll)
+                  </button>
+                  {pendingFile && (
+                    <span className="priv-file-preview">
+                      <strong>{pendingFile.filename}</strong>
+                      <span className="text-muted"> ({(pendingFile.size / 1024).toFixed(0)} KB)</span>
+                    </span>
+                  )}
+                </div>
+
+                {pendingFile && (
+                  <div className="priv-upload-form">
+                    <input
+                      type="text"
+                      value={privName}
+                      onChange={e => setPrivName(e.target.value)}
+                      placeholder="Nome do mod (ex: MeuPlugin)"
+                      style={{ flex: 1 }}
+                    />
+                    <button
+                      className="btn-secondary"
+                      onClick={handleUploadAndAdd}
+                      disabled={uploading || !privName.trim()}
+                    >
+                      {uploading ? 'Enviando...' : '↑ Upload e Adicionar'}
+                    </button>
+                    <button className="btn-ghost" onClick={() => { setPendingFile(null); setPrivName(''); setPrivFilename('') }}>
+                      ✕
+                    </button>
+                  </div>
+                )}
+                {uploadError && <p className="text-error" style={{ marginTop: 8, fontSize: 12 }}>{uploadError}</p>}
               </div>
-              <span className="form-hint">Mods privados são baixados pelo backend a partir do repo privado.</span>
+
+              {/* Existing mods in repo */}
+              {repoError && <p className="text-error" style={{ fontSize: 12, marginBottom: 8 }}>{repoError}</p>}
+              {repoMods.length > 0 && (
+                <div className="priv-repo-list">
+                  <p className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>Arquivos disponíveis no repo:</p>
+                  {repoMods.map(entry => {
+                    const inPack = modpackMods.some(m => m.source === 'private' && m.filename === entry.filename)
+                    return (
+                      <div key={entry.filename} className="priv-repo-item">
+                        <div className="priv-repo-info">
+                          <span className="priv-repo-filename">{entry.filename}</span>
+                          <span className="text-muted" style={{ fontSize: 11 }}>
+                            {(entry.size / 1024).toFixed(0)} KB · {new Date(entry.updatedAt).toLocaleDateString('pt-BR')}
+                          </span>
+                        </div>
+                        {inPack ? (
+                          <span className="text-muted" style={{ fontSize: 12 }}>✓ no modpack</span>
+                        ) : (
+                          <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => handleAddFromRepo(entry)}>
+                            + Adicionar
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {repoMods.length === 0 && !repoLoading && !repoError && (
+                <p className="text-muted" style={{ fontSize: 12 }}>
+                  Clique em "↻ Listar do repo" para ver os arquivos já disponíveis.
+                </p>
+              )}
             </div>
           </div>
 

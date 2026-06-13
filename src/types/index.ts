@@ -97,6 +97,7 @@ declare global {
         remove: (args: { modName: string; profile: string }) => Promise<{ success: boolean; error?: string }>
         applyConfig: (args: { profile: string; installPath: string; content: string }) => Promise<{ success: boolean; error?: string }>
         readConfigsFromZip: (args: { url: string }) => Promise<{ success: boolean; configs?: { filename: string; installPath: string; content: string }[]; error?: string }>
+        pickAndRead: () => Promise<{ filename: string; content: string; size: number } | null>
       }
       game: {
         launch: (args: { valheimPath: string; mode: 'vanilla' | 'modded'; profile: string }) => Promise<{ success: boolean; error?: string }>

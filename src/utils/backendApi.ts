@@ -56,6 +56,60 @@ export async function publishModpack(
 }
 
 /**
+ * Lista os mods privados disponíveis no repo.
+ *
+ * Endpoint esperado no Worker:
+ *   GET /mods/private
+ *   Authorization: Bearer <token>
+ *   → 200 { mods: { filename: string, size: number, updatedAt: string }[] }
+ */
+export async function listPrivateMods(
+  token: string,
+  backendUrl?: string,
+): Promise<{ filename: string; size: number; updatedAt: string }[]> {
+  const res = await fetch(`${base(backendUrl)}/mods/private`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as any).error || 'Falha ao listar mods privados')
+  }
+  const data = await res.json() as { mods: { filename: string; size: number; updatedAt: string }[] }
+  return data.mods || []
+}
+
+/**
+ * Faz upload de um arquivo de mod privado para o backend.
+ * O backend commita o arquivo no repo privado de mods.
+ *
+ * Endpoint esperado no Worker:
+ *   POST /mods/private/upload
+ *   Authorization: Bearer <token>
+ *   Content-Type: application/json
+ *   Body: { filename: string, content: string (base64) }
+ *   → 200 { success: true }
+ */
+export async function uploadPrivateMod(
+  token: string,
+  filename: string,
+  contentBase64: string,
+  backendUrl?: string,
+): Promise<void> {
+  const res = await fetch(`${base(backendUrl)}/mods/private/upload`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ filename, content: contentBase64 }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as any).error || 'Falha ao fazer upload do mod')
+  }
+}
+
+/**
  * Resolve a URL/headers de download de um mod privado.
  * O `downloadUrl` do manifesto é um caminho relativo (ex: /mods/private/Foo.zip)
  * que será resolvido contra o backend, com o header de autenticação.

@@ -166,10 +166,20 @@ app.whenReady().then(() => {
   ipcMain.handle('mods:install', async (_e, { zipPath, modName, profile }) => {
     try {
       ensureDirs(profile)
-      const AdmZip = require('adm-zip')
-      const zip = new AdmZip(zipPath)
-      const pluginsPath = path.join(profileDir(profile), 'BepInEx', 'plugins', modName)
-      zip.extractAllTo(pluginsPath, true)
+      const ext = path.extname(zipPath).toLowerCase()
+      const modFolder = path.join(profileDir(profile), 'BepInEx', 'plugins', modName)
+
+      if (ext === '.dll') {
+        // DLL: copy directly into the mod's own plugin folder so BepInEx can find it
+        fs.mkdirSync(modFolder, { recursive: true })
+        fs.copyFileSync(zipPath, path.join(modFolder, path.basename(zipPath)))
+      } else {
+        // ZIP (default): extract entire archive into the mod folder
+        const AdmZip = require('adm-zip')
+        const zip = new AdmZip(zipPath)
+        zip.extractAllTo(modFolder, true)
+      }
+
       fs.unlinkSync(zipPath)
       return { success: true }
     } catch (err: any) {
@@ -185,7 +195,9 @@ app.whenReady().then(() => {
         headers: headers || undefined,
         maxRedirects: 5,
       })
-      const tempPath = path.join(os.tmpdir(), `${modName}-${Date.now()}.zip`)
+      // Preserve the real file extension so mods:install can detect the file type
+      const urlExt = path.extname(url.split('?')[0]).toLowerCase() || '.zip'
+      const tempPath = path.join(os.tmpdir(), `${modName}-${Date.now()}${urlExt}`)
       fs.writeFileSync(tempPath, Buffer.from(response.data))
       return { success: true, tempPath }
     } catch (err: any) {
@@ -215,6 +227,26 @@ app.whenReady().then(() => {
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('mods:pickAndRead', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Selecione o arquivo do mod',
+      filters: [
+        { name: 'Arquivos de Mod', extensions: ['zip', 'dll'] },
+        { name: 'Todos os arquivos', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const filePath = result.filePaths[0]
+    const stat = fs.statSync(filePath)
+    const content = fs.readFileSync(filePath).toString('base64')
+    return {
+      filename: path.basename(filePath),
+      content,
+      size: stat.size,
     }
   })
 

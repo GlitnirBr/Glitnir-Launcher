@@ -441,6 +441,85 @@
   max-width: 960px;
 }
 
+/* ── Private mod upload ── */
+.priv-upload-area {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.priv-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.priv-pick-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px !important;
+}
+
+.priv-file-preview {
+  font-size: 13px;
+  color: var(--text-primary);
+  background: rgba(58, 123, 213, 0.08);
+  border: 1px solid rgba(58, 123, 213, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+}
+
+.priv-upload-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Private mod repo list */
+.priv-repo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.priv-repo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  gap: 12px;
+}
+
+.priv-repo-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.priv-repo-filename {
+  font-size: 13px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.text-error {
+  color: var(--accent-red);
+}
+
 /* ── Config suggestions (found in mod zip scans) ── */
 .config-suggestions-area {
   display: flex;
