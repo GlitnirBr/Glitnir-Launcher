@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
 import { fetchModpackFromUrl, buildModpackRawUrl } from '../utils/modManager'
@@ -13,6 +13,14 @@ interface Props {
 
 type Target = 'main' | 'admin'
 type Tab = 'online' | 'modpack' | 'configs'
+
+type PackDraft = {
+  name: string
+  description: string
+  version: string
+  mods: Mod[]
+  configs: ModConfig[]
+}
 
 const PAGE_SIZE = 50
 
@@ -46,12 +54,39 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
   const [error, setError] = useState('')
   const [publishing, setPublishing] = useState(false)
 
+  // Config suggestions discovered from mod zip scans
+  type ConfigSuggestion = { modName: string; configs: { filename: string; installPath: string; content: string }[] }
+  const [suggestedConfigs, setSuggestedConfigs] = useState<ConfigSuggestion[]>([])
+  const [scanningMods, setScanningMods] = useState<Set<string>>(new Set())
+
+  // Inline editing of existing configs in the Configs tab
+  const [editingConfigIndex, setEditingConfigIndex] = useState<number | null>(null)
+  const [editingContent, setEditingContent] = useState('')
+
+  // Per-target drafts — persists unsaved changes when switching between modpacks
+  const drafts = useRef<Partial<Record<Target, PackDraft>>>({})
+
   const backendUrl = config.backendUrl || ''
   const modpackRepo = config.modpackRepo || ''
   const modpackBranch = config.modpackBranch || 'main'
 
+  const applyDraft = useCallback((draft: PackDraft) => {
+    setPackName(draft.name)
+    setPackDescription(draft.description)
+    setPackVersion(draft.version)
+    setModpackMods(draft.mods)
+    setModpackConfigs(draft.configs)
+  }, [])
+
   const loadModpack = useCallback(async () => {
     setError('')
+    // Restore in-memory draft first — no server round-trip needed
+    const draft = drafts.current[target]
+    if (draft) {
+      applyDraft(draft)
+      return
+    }
+    // First time loading this target — fetch from server
     try {
       let data: Modpack | null = null
       if (target === 'admin') {
@@ -61,23 +96,39 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
         const url = buildModpackRawUrl(modpackRepo, modpackBranch)
         data = await fetchModpackFromUrl(url)
       }
-      if (data) {
-        setPackName(data.name || '')
-        setPackDescription(data.description || '')
-        setPackVersion(data.version || '1.0.0')
-        setModpackMods(data.mods || [])
-        setModpackConfigs(data.configs || [])
+      const fetched: PackDraft = {
+        name: data?.name || (target === 'admin' ? 'Glitnir Admin' : 'Glitnir'),
+        description: data?.description || '',
+        version: data?.version || '1.0.0',
+        mods: data?.mods || [],
+        configs: data?.configs || [],
       }
+      drafts.current[target] = fetched
+      applyDraft(fetched)
     } catch {
-      setPackName(target === 'admin' ? 'Modpack Teste Admin' : 'Modpack Servidor Principal')
-      setPackDescription('')
-      setPackVersion('1.0.0')
-      setModpackMods([])
-      setModpackConfigs([])
+      const fallback: PackDraft = {
+        name: target === 'admin' ? 'Glitnir Admin' : 'Glitnir',
+        description: '',
+        version: '1.0.0',
+        mods: [],
+        configs: [],
+      }
+      applyDraft(fallback)
     }
-  }, [target, adminToken, backendUrl, modpackRepo, modpackBranch])
+  }, [target, adminToken, backendUrl, modpackRepo, modpackBranch, applyDraft])
 
   useEffect(() => { loadModpack() }, [loadModpack])
+
+  // Keep in-memory draft in sync with every edit so switching never loses work
+  useEffect(() => {
+    drafts.current[target] = {
+      name: packName,
+      description: packDescription,
+      version: packVersion,
+      mods: modpackMods,
+      configs: modpackConfigs,
+    }
+  }, [target, packName, packDescription, packVersion, modpackMods, modpackConfigs])
 
   const loadMods = useCallback(() => {
     setLoadingMods(true)
@@ -128,14 +179,32 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
 
   function handleAddThunderstoreMod(ts: ThunderstoreMod) {
     if (modpackMods.some(m => m.source === 'thunderstore' && m.namespace === ts.owner && m.name === ts.name)) return
-    setModpackMods([...modpackMods, {
+    const downloadUrl = getDownloadUrl(ts.owner, ts.name, ts.latest.version_number)
+    setModpackMods(prev => [...prev, {
       name: ts.name,
       source: 'thunderstore',
       namespace: ts.owner,
       version: ts.latest.version_number,
-      downloadUrl: getDownloadUrl(ts.owner, ts.name, ts.latest.version_number),
+      downloadUrl,
       description: ts.latest.description?.slice(0, 120),
     }])
+    // Scan the mod zip for bundled config files in background (Electron only)
+    const w = window as any
+    if (w?.glitnir?.mods?.readConfigsFromZip) {
+      setScanningMods(prev => new Set(prev).add(ts.name))
+      w.glitnir.mods.readConfigsFromZip({ url: downloadUrl })
+        .then((result: { success: boolean; configs?: { filename: string; installPath: string; content: string }[]; error?: string }) => {
+          if (result.success && result.configs && result.configs.length > 0) {
+            setSuggestedConfigs(prev => {
+              const existing = prev.find(s => s.modName === ts.name)
+              if (existing) return prev
+              return [...prev, { modName: ts.name, configs: result.configs! }]
+            })
+          }
+        })
+        .catch(() => {})
+        .finally(() => setScanningMods(prev => { const s = new Set(prev); s.delete(ts.name); return s }))
+    }
   }
 
   function handleAddPrivateMod() {
@@ -216,29 +285,6 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
       <div className="admin-header">
         <h1>Editor de Modpack</h1>
         <p className="text-secondary">Navegue mods do Thunderstore e monte seu modpack.</p>
-      </div>
-
-      {/* Target selector */}
-      <div className="admin-section card">
-        <div className="card-body">
-          <div className="form-group" style={{ marginBottom: 0 }}>
-            <label>Modpack alvo</label>
-            <div className="search-row" style={{ marginBottom: 0 }}>
-              <button
-                className={target === 'main' ? 'btn-secondary' : 'btn-ghost'}
-                onClick={() => setTarget('main')}
-              >
-                Servidor Principal (público)
-              </button>
-              <button
-                className={target === 'admin' ? 'btn-secondary' : 'btn-ghost'}
-                onClick={() => setTarget('admin')}
-              >
-                Teste Admin (secreto)
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
@@ -359,6 +405,72 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
                 )}
               </>
             )}
+
+            {/* Config suggestions from scanned mod zips */}
+            {(scanningMods.size > 0 || suggestedConfigs.length > 0) && (
+              <div className="config-suggestions-area">
+                {scanningMods.size > 0 && (
+                  <div className="config-scan-notice text-muted">
+                    Verificando configs em {Array.from(scanningMods).join(', ')}...
+                  </div>
+                )}
+                {suggestedConfigs.map((suggestion, si) => (
+                  <div key={`${suggestion.modName}-${si}`} className="config-suggestion-card">
+                    <div className="suggestion-card-header">
+                      <span>
+                        <strong>{suggestion.modName}</strong> — {suggestion.configs.length} arquivo{suggestion.configs.length > 1 ? 's' : ''} de config encontrado{suggestion.configs.length > 1 ? 's' : ''}
+                      </span>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          className="btn-secondary"
+                          style={{ fontSize: 12 }}
+                          onClick={() => {
+                            const toAdd = suggestion.configs
+                              .filter(c => !modpackConfigs.some(mc => mc.filename === c.filename))
+                              .map(c => ({ mod: suggestion.modName, filename: c.filename, installPath: c.installPath, content: c.content }))
+                            if (toAdd.length > 0) setModpackConfigs(prev => [...prev, ...toAdd])
+                            setSuggestedConfigs(prev => prev.filter((_, i) => i !== si))
+                          }}
+                        >
+                          + Adicionar todos
+                        </button>
+                        <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => setSuggestedConfigs(prev => prev.filter((_, i) => i !== si))}>
+                          Ignorar
+                        </button>
+                      </div>
+                    </div>
+                    <div className="suggestion-file-list">
+                      {suggestion.configs.map((cfg, ci) => {
+                        const alreadyAdded = modpackConfigs.some(mc => mc.filename === cfg.filename)
+                        return (
+                          <div key={cfg.filename} className="suggestion-file-item">
+                            <span className="suggestion-filename">{cfg.filename}</span>
+                            <span className="text-muted" style={{ fontSize: 11, flex: 1 }}>{cfg.installPath}</span>
+                            {alreadyAdded ? (
+                              <span className="text-muted" style={{ fontSize: 12 }}>✓ já adicionado</span>
+                            ) : (
+                              <button
+                                className="btn-ghost"
+                                style={{ fontSize: 12 }}
+                                onClick={() => {
+                                  setModpackConfigs(prev => [...prev, { mod: suggestion.modName, filename: cfg.filename, installPath: cfg.installPath, content: cfg.content }])
+                                  setSuggestedConfigs(prev => prev.map((s, i) => i === si
+                                    ? { ...s, configs: s.configs.filter((_, j) => j !== ci) }
+                                    : s
+                                  ).filter(s => s.configs.length > 0))
+                                }}
+                              >
+                                + Adicionar
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </ErrorBoundary>
         </div>
       )}
@@ -371,8 +483,26 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
             <div className="card-header"><h3>Informações do Modpack</h3></div>
             <div className="card-body">
               <div className="form-group">
-                <label>Nome</label>
-                <input type="text" value={packName} onChange={e => setPackName(e.target.value)} />
+                <label>Modpack</label>
+                <select
+                  value={target}
+                  onChange={e => {
+                    const t = e.target.value as Target
+                    // Save current state before switching — draft sync effect also handles this
+                    // but we want it captured synchronously before the target state flip
+                    drafts.current[target] = {
+                      name: packName,
+                      description: packDescription,
+                      version: packVersion,
+                      mods: modpackMods,
+                      configs: modpackConfigs,
+                    }
+                    setTarget(t)
+                  }}
+                >
+                  <option value="main">Glitnir (servidor público)</option>
+                  <option value="admin">Glitnir Admin (secreto)</option>
+                </select>
               </div>
               <div className="form-group">
                 <label>Descrição</label>
@@ -446,7 +576,7 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
           <div className="admin-actions">
             <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
               onClick={handlePublish} disabled={publishing}>
-              {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Principal' : 'Admin'})`}
+              {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Glitnir' : 'Glitnir Admin'})`}
             </button>
           </div>
         </>
@@ -492,15 +622,71 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
                 <p className="text-muted">Nenhuma config adicionada.</p>
               ) : (
                 <div className="modpack-mods">
-                  {modpackConfigs.map((cfg, index) => (
-                    <div key={`${cfg.filename}-${index}`} className="modpack-mod-item">
-                      <div className="mod-info">
-                        <span className="mod-name">{cfg.filename}</span>
-                        <span className="text-muted">{cfg.installPath}{cfg.mod ? ` · ${cfg.mod}` : ''}</span>
+                  {modpackConfigs.map((cfg, index) => {
+                    const isEditing = editingConfigIndex === index
+                    return (
+                      <div key={`${cfg.filename}-${index}`} className={`modpack-mod-item cfg-item ${isEditing ? 'cfg-item-expanded' : ''}`}>
+                        <div className="cfg-item-header">
+                          <div className="mod-info">
+                            <span className="mod-name">{cfg.filename}</span>
+                            <span className="text-muted">{cfg.installPath}{cfg.mod ? ` · ${cfg.mod}` : ''}</span>
+                          </div>
+                          <div className="cfg-item-actions">
+                            <button
+                              className="btn-ghost"
+                              style={{ fontSize: 12 }}
+                              onClick={() => {
+                                if (isEditing) {
+                                  setEditingConfigIndex(null)
+                                } else {
+                                  setEditingConfigIndex(index)
+                                  setEditingContent(cfg.content)
+                                }
+                              }}
+                            >
+                              {isEditing ? 'Fechar' : 'Editar'}
+                            </button>
+                            <button className="btn-ghost btn-remove" onClick={() => {
+                              handleRemoveConfig(index)
+                              if (editingConfigIndex === index) setEditingConfigIndex(null)
+                            }}>Remover</button>
+                          </div>
+                        </div>
+                        {isEditing && (
+                          <div className="cfg-edit-area">
+                            <textarea
+                              className="cfg-edit-textarea"
+                              value={editingContent}
+                              onChange={e => setEditingContent(e.target.value)}
+                              rows={12}
+                              spellCheck={false}
+                              placeholder="Conteúdo do arquivo, ou uma URL https:// para buscar no momento da instalação"
+                            />
+                            <div className="cfg-edit-footer">
+                              <span className="text-muted" style={{ fontSize: 11 }}>
+                                {editingContent.startsWith('http') ? '🔗 URL — conteúdo será buscado na instalação' : `${editingContent.length} chars`}
+                              </span>
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                <button
+                                  className="btn-secondary"
+                                  style={{ fontSize: 13 }}
+                                  onClick={() => {
+                                    setModpackConfigs(modpackConfigs.map((c, i) => i === index ? { ...c, content: editingContent } : c))
+                                    setEditingConfigIndex(null)
+                                  }}
+                                >
+                                  Salvar
+                                </button>
+                                <button className="btn-ghost" style={{ fontSize: 13 }} onClick={() => setEditingConfigIndex(null)}>
+                                  Cancelar
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <button className="btn-ghost btn-remove" onClick={() => handleRemoveConfig(index)}>Remover</button>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -509,7 +695,7 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
           <div className="admin-actions">
             <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
               onClick={handlePublish} disabled={publishing}>
-              {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Principal' : 'Admin'})`}
+              {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Glitnir' : 'Glitnir Admin'})`}
             </button>
           </div>
         </>

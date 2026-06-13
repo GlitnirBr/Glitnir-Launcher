@@ -175,10 +175,10 @@
   left: 0;
   right: 0;
   margin-bottom: 4px;
-  background: #0f1928;
-  border: 1px solid var(--border-color);
+  background: #111e2e;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.7);
   z-index: 100;
 }
 
@@ -187,7 +187,7 @@
   width: 100%;
   padding: 10px 12px;
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   background: transparent;
   border: none;
   text-align: left;
@@ -195,8 +195,8 @@
   transition: all 0.15s ease;
 }
 .sidebar-footer .dropdown-item:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
 }
 .sidebar-footer .dropdown-item.active {
   color: var(--accent-blue-hover);

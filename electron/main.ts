@@ -218,6 +218,37 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('mods:readConfigsFromZip', async (_e, { url }: { url: string }) => {
+    try {
+      const axios = require('axios')
+      const AdmZip = require('adm-zip')
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        maxRedirects: 5,
+        timeout: 30000,
+      })
+      const zip = new AdmZip(Buffer.from(response.data))
+      const found: { filename: string; installPath: string; content: string }[] = []
+      for (const entry of zip.getEntries()) {
+        if (entry.isDirectory) continue
+        const name = entry.entryName.replace(/\\/g, '/')
+        if (!name.endsWith('.cfg')) continue
+        const filename = path.basename(name)
+        // Normalize to BepInEx/config/<filename> regardless of where in the zip it lives
+        const installPath = `BepInEx/config/${filename}`
+        try {
+          const content = entry.getData().toString('utf-8')
+          found.push({ filename, installPath, content })
+        } catch {
+          // Skip unreadable entries
+        }
+      }
+      return { success: true, configs: found }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
   ipcMain.handle('mods:list', (_e, profile: string) => {
     const pluginsPath = path.join(profileDir(profile), 'BepInEx', 'plugins')
     if (!fs.existsSync(pluginsPath)) return []

@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('glitnir', {
       ipcRenderer.invoke('mods:remove', args),
     applyConfig: (args: { profile: string; installPath: string; content: string }) =>
       ipcRenderer.invoke('mods:applyConfig', args),
+    readConfigsFromZip: (args: { url: string }) =>
+      ipcRenderer.invoke('mods:readConfigsFromZip', args),
   },
 
   game: {
