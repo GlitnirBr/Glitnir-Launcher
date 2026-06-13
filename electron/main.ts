@@ -302,10 +302,12 @@ app.whenReady().then(() => {
     }
     // Normalize in the main process before IPC transfer:
     // raw response is ~156MB uncompressed; trimming to essential fields reduces it to ~5MB
+    // Note: Thunderstore API no longer includes total_downloads at package level — sum from versions
     return raw
       .filter((pkg: any) => Array.isArray(pkg.versions) && pkg.versions.length > 0)
       .map((pkg: any) => {
         const v = pkg.versions[0]
+        const total_downloads = pkg.versions.reduce((sum: number, ver: any) => sum + (ver.downloads || 0), 0)
         return {
           name: pkg.name,
           full_name: pkg.full_name,
@@ -316,7 +318,7 @@ app.whenReady().then(() => {
           rating_score: pkg.rating_score,
           is_pinned: pkg.is_pinned,
           is_deprecated: pkg.is_deprecated,
-          total_downloads: pkg.total_downloads,
+          total_downloads,
           categories: pkg.categories,
           latest: {
             name: v.name,

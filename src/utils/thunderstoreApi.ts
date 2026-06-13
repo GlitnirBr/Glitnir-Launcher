@@ -50,10 +50,12 @@ export async function fetchAllMods(): Promise<ThunderstoreMod[]> {
     if (!res.ok) throw new Error(`Thunderstore HTTP ${res.status}`)
     const raw: any[] = await res.json()
     if (!Array.isArray(raw)) throw new Error('Resposta inesperada do Thunderstore')
+    // Note: Thunderstore API no longer includes total_downloads at package level — sum from versions
     result = raw
       .filter(pkg => Array.isArray(pkg.versions) && pkg.versions.length > 0)
       .map(pkg => {
         const v = pkg.versions[0]
+        const total_downloads = (pkg.versions as any[]).reduce((sum, ver) => sum + (ver.downloads || 0), 0)
         return {
           name: pkg.name,
           full_name: pkg.full_name,
@@ -64,7 +66,7 @@ export async function fetchAllMods(): Promise<ThunderstoreMod[]> {
           rating_score: pkg.rating_score,
           is_pinned: pkg.is_pinned,
           is_deprecated: pkg.is_deprecated,
-          total_downloads: pkg.total_downloads,
+          total_downloads,
           categories: pkg.categories,
           latest: {
             name: v.name,

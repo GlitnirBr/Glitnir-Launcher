@@ -355,7 +355,13 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
                   {visibleMods.map(mod => {
                     const already = modpackMods.some(m => m.source === 'thunderstore' && m.namespace === mod.owner && m.name === mod.name)
                     return (
-                      <div key={mod.full_name} className={`ts-mod-item ${already ? 'ts-mod-added' : ''}`}>
+                      <div
+                        key={mod.full_name}
+                        className={`ts-mod-item ${already ? 'ts-mod-added' : ''}`}
+                        title="Clique para abrir no Thunderstore"
+                        onClick={() => mod.package_url && (window as any).glitnir?.shell?.openExternal(mod.package_url)}
+                        style={{ cursor: mod.package_url ? 'pointer' : undefined }}
+                      >
                         {mod.latest.icon ? (
                           <img
                             className="ts-mod-icon"
@@ -384,7 +390,7 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
                         <button
                           className={already ? 'btn-ghost' : 'btn-secondary'}
                           style={{ flexShrink: 0, fontSize: 13 }}
-                          onClick={() => handleAddThunderstoreMod(mod)}
+                          onClick={e => { e.stopPropagation(); handleAddThunderstoreMod(mod) }}
                           disabled={already}
                         >
                           {already ? '✓ No modpack' : '+ Adicionar'}

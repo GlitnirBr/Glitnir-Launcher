@@ -144,22 +144,41 @@ export default function ModsView({
             </p>
           )}
           <div className="mod-items">
-            {mods.map((mod, i) => (
-              <div key={`${mod.name}-${i}`} className={`mod-item ${mod.installed && !mod.outdated ? 'installed' : ''}`}>
-                <div className="mod-info">
-                  <span className="mod-name">
-                    {mod.name}
-                    {mod.source === 'private' && <span className="badge badge-warning" style={{ marginLeft: 8 }}>privado</span>}
-                  </span>
-                  <span className="mod-version">{mod.version ? `v${mod.version}` : mod.filename}</span>
+            {mods.map((mod, i) => {
+              const tsUrl = mod.source === 'thunderstore' && mod.namespace
+                ? `https://thunderstore.io/c/valheim/p/${mod.namespace}/${mod.name}/`
+                : null
+              return (
+                <div
+                  key={`${mod.name}-${i}`}
+                  className={`mod-item ${mod.installed && !mod.outdated ? 'installed' : ''} ${tsUrl ? 'mod-item-clickable' : ''}`}
+                  title={tsUrl ? 'Clique para ver no Thunderstore' : undefined}
+                  onClick={() => tsUrl && (window as any).glitnir?.shell?.openExternal(tsUrl)}
+                >
+                  <div className="mod-info">
+                    <span className="mod-name">
+                      {mod.name}
+                      {mod.source === 'private' && <span className="badge badge-warning" style={{ marginLeft: 8 }}>privado</span>}
+                    </span>
+                    <span className="mod-version">{mod.version ? `v${mod.version}` : mod.filename}</span>
+                  </div>
+                  <div className="mod-status">
+                    {tsUrl && (
+                      <span className="mod-ts-link" title="Ver no Thunderstore">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13">
+                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                          <polyline points="15,3 21,3 21,9" />
+                          <line x1="10" y1="14" x2="21" y2="3" />
+                        </svg>
+                      </span>
+                    )}
+                    {mod.outdated && <span className="badge badge-warning">Desatualizado</span>}
+                    {!mod.installed && !mod.outdated && <span className="badge badge-announcement">Nao instalado</span>}
+                    {mod.installed && !mod.outdated && <span className="badge badge-update">Instalado</span>}
+                  </div>
                 </div>
-                <div className="mod-status">
-                  {mod.outdated && <span className="badge badge-warning">Desatualizado</span>}
-                  {!mod.installed && !mod.outdated && <span className="badge badge-announcement">Nao instalado</span>}
-                  {mod.installed && !mod.outdated && <span className="badge badge-update">Instalado</span>}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </div>
