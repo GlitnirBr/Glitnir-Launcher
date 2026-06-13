@@ -279,14 +279,22 @@
   margin-bottom: 10px;
 }
 
+/* Thunderstore browser panel — fills available height */
+.ts-browser-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
 /* Thunderstore mod browser */
 .ts-mod-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 420px;
   overflow-y: auto;
   padding-right: 4px;
+  max-height: calc(100vh - 360px);
+  min-height: 200px;
 }
 
 .ts-mod-item {
@@ -346,4 +354,89 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Mod category badges */
+.ts-mod-badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.ts-mod-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(58, 123, 213, 0.15);
+  color: var(--accent-blue-hover);
+  border: 1px solid rgba(58, 123, 213, 0.25);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Loading state */
+.ts-loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 0;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+
+.ts-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(58, 123, 213, 0.2);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: ts-spin 0.8s linear infinite;
+}
+
+@keyframes ts-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Load more */
+.ts-load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 0 4px;
+}
+
+.ts-load-more-btn {
+  padding: 10px 24px !important;
+  font-size: 13px !important;
+  border-color: var(--border-color) !important;
+}
+
+/* Card header with action button */
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Inline link button */
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--accent-blue);
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+.btn-link:hover {
+  color: var(--accent-blue-hover);
+}
+
+/* Editor layout */
+.modpack-editor {
+  max-width: 960px;
 }

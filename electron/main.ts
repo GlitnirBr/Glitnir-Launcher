@@ -265,10 +265,44 @@ app.whenReady().then(() => {
       timeout: 60000,
       headers: { 'Accept-Encoding': 'gzip, deflate' },
     })
-    if (!Array.isArray(response.data)) {
+    const raw: any[] = response.data
+    if (!Array.isArray(raw)) {
       throw new Error('Resposta inesperada do Thunderstore')
     }
-    return response.data
+    // Normalize in the main process before IPC transfer:
+    // raw response is ~156MB uncompressed; trimming to essential fields reduces it to ~5MB
+    return raw
+      .filter((pkg: any) => Array.isArray(pkg.versions) && pkg.versions.length > 0)
+      .map((pkg: any) => {
+        const v = pkg.versions[0]
+        return {
+          name: pkg.name,
+          full_name: pkg.full_name,
+          owner: pkg.owner,
+          package_url: pkg.package_url,
+          date_created: pkg.date_created,
+          date_updated: pkg.date_updated,
+          rating_score: pkg.rating_score,
+          is_pinned: pkg.is_pinned,
+          is_deprecated: pkg.is_deprecated,
+          total_downloads: pkg.total_downloads,
+          categories: pkg.categories,
+          latest: {
+            name: v.name,
+            full_name: v.full_name,
+            description: v.description,
+            icon: v.icon,
+            version_number: v.version_number,
+            download_url: v.download_url,
+            downloads: v.downloads,
+            date_created: v.date_created,
+            website_url: v.website_url,
+            is_active: v.is_active,
+            file_size: v.file_size,
+            dependencies: v.dependencies || [],
+          },
+        }
+      })
   })
 
   app.on('activate', () => {

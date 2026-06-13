@@ -1,4 +1,4 @@
-type VersionInfo = {
+export type VersionInfo = {
   name: string
   full_name: string
   description: string
@@ -10,6 +10,7 @@ type VersionInfo = {
   website_url: string
   is_active: boolean
   file_size: number
+  dependencies: string[]
 }
 
 export interface ThunderstoreMod {
@@ -24,8 +25,6 @@ export interface ThunderstoreMod {
   is_deprecated: boolean
   total_downloads: number
   categories: string[]
-  versions: VersionInfo[]
-  // Computed from versions[0] for convenience — the API returns "versions" not "latest"
   latest: VersionInfo
 }
 
@@ -33,50 +32,66 @@ let cachedMods: ThunderstoreMod[] | null = null
 let cacheTime: number = 0
 const CACHE_DURATION = 5 * 60 * 1000
 
-function normalizePackages(raw: any[]): ThunderstoreMod[] {
-  return raw
-    .filter(pkg => Array.isArray(pkg.versions) && pkg.versions.length > 0)
-    .map(pkg => ({ ...pkg, latest: pkg.versions[0] }))
-}
-
 export async function fetchAllMods(): Promise<ThunderstoreMod[]> {
   const now = Date.now()
   if (cachedMods && now - cacheTime < CACHE_DURATION) {
     return cachedMods
   }
 
-  let raw: any[]
+  let result: ThunderstoreMod[]
 
-  // Use IPC when running inside Electron (avoids CORS/CSP restrictions)
+  // Use IPC when running inside Electron — main process normalizes to ~5MB before transfer
   const w = window as any
   if (w?.glitnir?.thunderstore?.fetchAll) {
-    raw = await w.glitnir.thunderstore.fetchAll()
+    result = await w.glitnir.thunderstore.fetchAll()
   } else {
+    // Browser fallback: fetch full dump and normalize client-side
     const res = await fetch('https://thunderstore.io/c/valheim/api/v1/package/')
     if (!res.ok) throw new Error(`Thunderstore HTTP ${res.status}`)
-    raw = await res.json()
+    const raw: any[] = await res.json()
+    if (!Array.isArray(raw)) throw new Error('Resposta inesperada do Thunderstore')
+    result = raw
+      .filter(pkg => Array.isArray(pkg.versions) && pkg.versions.length > 0)
+      .map(pkg => {
+        const v = pkg.versions[0]
+        return {
+          name: pkg.name,
+          full_name: pkg.full_name,
+          owner: pkg.owner,
+          package_url: pkg.package_url,
+          date_created: pkg.date_created,
+          date_updated: pkg.date_updated,
+          rating_score: pkg.rating_score,
+          is_pinned: pkg.is_pinned,
+          is_deprecated: pkg.is_deprecated,
+          total_downloads: pkg.total_downloads,
+          categories: pkg.categories,
+          latest: {
+            name: v.name,
+            full_name: v.full_name,
+            description: v.description,
+            icon: v.icon,
+            version_number: v.version_number,
+            download_url: v.download_url,
+            downloads: v.downloads,
+            date_created: v.date_created,
+            website_url: v.website_url,
+            is_active: v.is_active,
+            file_size: v.file_size,
+            dependencies: v.dependencies || [],
+          },
+        } as ThunderstoreMod
+      })
   }
 
-  if (!Array.isArray(raw)) throw new Error('Resposta inesperada do Thunderstore')
-
-  cachedMods = normalizePackages(raw)
+  cachedMods = result.filter(m => !m.is_deprecated)
   cacheTime = now
   return cachedMods
 }
 
-export async function searchMods(query: string): Promise<ThunderstoreMod[]> {
-  const allMods = await fetchAllMods()
-  const q = query.toLowerCase()
-
-  return allMods
-    .filter(mod =>
-      !mod.is_deprecated &&
-      (mod.name.toLowerCase().includes(q) ||
-       mod.owner.toLowerCase().includes(q) ||
-       mod.latest.description?.toLowerCase().includes(q))
-    )
-    .sort((a, b) => b.total_downloads - a.total_downloads)
-    .slice(0, 50)
+export function clearModsCache() {
+  cachedMods = null
+  cacheTime = 0
 }
 
 export function getThunderstoreId(mod: ThunderstoreMod): string {
