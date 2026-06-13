@@ -116,9 +116,9 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
       source = source.filter(m => (m.categories || []).includes(categoryFilter))
     }
     const sorted = [...source]
-    if (sortBy === 'downloads') sorted.sort((a, b) => b.total_downloads - a.total_downloads)
-    else if (sortBy === 'rating') sorted.sort((a, b) => b.rating_score - a.rating_score)
-    else if (sortBy === 'updated') sorted.sort((a, b) => b.date_updated.localeCompare(a.date_updated))
+    if (sortBy === 'downloads') sorted.sort((a, b) => (b.total_downloads ?? 0) - (a.total_downloads ?? 0))
+    else if (sortBy === 'rating') sorted.sort((a, b) => (b.rating_score ?? 0) - (a.rating_score ?? 0))
+    else if (sortBy === 'updated') sorted.sort((a, b) => (b.date_updated ?? '').localeCompare(a.date_updated ?? ''))
     else if (sortBy === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name))
     return sorted
   }, [allMods, searchQuery, sortBy, categoryFilter])
@@ -324,7 +324,7 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
                         <div className="ts-mod-info">
                           <span className="ts-mod-name">{mod.name}</span>
                           <span className="ts-mod-meta">
-                            {mod.owner} · v{mod.latest.version_number} · ↓ {mod.total_downloads.toLocaleString()}
+                            {mod.owner} · v{mod.latest.version_number} · ↓ {(mod.total_downloads ?? 0).toLocaleString()}
                           </span>
                           <span className="ts-mod-desc">{mod.latest.description?.slice(0, 100)}</span>
                           {mod.categories && mod.categories.length > 0 && (
