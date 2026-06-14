@@ -9,6 +9,7 @@ import './AdminView.css'
 interface Props {
   config: Config
   adminToken: string | null
+  onSave?: (updates: Partial<Config>) => Promise<void>
 }
 
 type Target = 'main' | 'admin'
@@ -24,7 +25,7 @@ type PackDraft = {
 
 const PAGE_SIZE = 50
 
-export default function ModpackEditorView({ config, adminToken }: Props) {
+export default function ModpackEditorView({ config, adminToken, onSave }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('online')
   const [target, setTarget] = useState<Target>('main')
 
@@ -75,12 +76,27 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
   const [editingConfigIndex, setEditingConfigIndex] = useState<number | null>(null)
   const [editingContent, setEditingContent] = useState('')
 
-  // Bulk scan results shown in Configs tab
-  const [allModScans, setAllModScans] = useState<ConfigSuggestion[]>([])
-  const [scanningAll, setScanningAll] = useState(false)
+  // Local filesystem config reader
+  const [localConfigDir, setLocalConfigDir] = useState('')
+  const [localConfigFiles, setLocalConfigFiles] = useState<string[]>([])
+  const [localConfigLoading, setLocalConfigLoading] = useState(false)
+  const [localConfigError, setLocalConfigError] = useState('')
+  const [localSelectedFile, setLocalSelectedFile] = useState('')
+  const [localFileContent, setLocalFileContent] = useState('')
+  const [localFileLoading, setLocalFileLoading] = useState(false)
+  const [localFileSaving, setLocalFileSaving] = useState(false)
+  const [localFileSaved, setLocalFileSaved] = useState(false)
 
   // Per-target drafts — persists unsaved changes when switching between modpacks
   const drafts = useRef<Partial<Record<Target, PackDraft>>>({})
+
+  // Pre-fill localConfigDir from saved config on mount
+  useEffect(() => {
+    if (config.adminProfilePath && !localConfigDir) {
+      setLocalConfigDir(config.adminProfilePath)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const backendUrl = config.backendUrl || ''
   const modpackRepo = config.modpackRepo || ''
@@ -133,11 +149,7 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
     }
   }, [target, adminToken, backendUrl, modpackRepo, modpackBranch, applyDraft])
 
-  useEffect(() => {
-    loadModpack()
-    setAllModScans([])
-    setScanningAll(false)
-  }, [loadModpack])
+  useEffect(() => { loadModpack() }, [loadModpack])
 
   // Keep in-memory draft in sync with every edit so switching never loses work
   useEffect(() => {
@@ -363,30 +375,74 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
     setModpackConfigs(modpackConfigs.filter((_, i) => i !== index))
   }
 
-  async function handleScanAllMods() {
-    const w = window as any
-    if (!w?.glitnir?.mods?.readConfigsFromZip) return
-    const thunderstoreMods = modpackMods.filter(m => m.source === 'thunderstore' && m.downloadUrl)
-    if (thunderstoreMods.length === 0) return
-    setScanningAll(true)
-    setAllModScans([])
-    const results = await Promise.allSettled(
-      thunderstoreMods.map(async (mod) => {
-        if (configScanCache.current[mod.name]) {
-          return { modName: mod.name, configs: configScanCache.current[mod.name] }
-        }
-        const result = await w.glitnir.mods.readConfigsFromZip({ url: mod.downloadUrl! })
-        const configs = result.success ? (result.configs ?? []) : []
-        configScanCache.current[mod.name] = configs
-        return { modName: mod.name, configs }
-      })
-    )
-    const scans = results
-      .filter((r): r is PromiseFulfilledResult<ConfigSuggestion> => r.status === 'fulfilled')
-      .map(r => r.value)
-      .filter(s => s.configs.length > 0)
-    setAllModScans(scans)
-    setScanningAll(false)
+  async function handlePickLocalDir() {
+    const dir = await window.glitnir.fs.pickDir()
+    if (dir) {
+      setLocalConfigDir(dir)
+      setLocalConfigFiles([])
+      setLocalConfigError('')
+      setLocalSelectedFile('')
+      setLocalFileContent('')
+      onSave?.({ adminProfilePath: dir })
+    }
+  }
+
+  async function handleListLocalConfigs() {
+    const dir = localConfigDir.trim()
+    if (!dir) return
+    setLocalConfigLoading(true)
+    setLocalConfigError('')
+    setLocalConfigFiles([])
+    setLocalSelectedFile('')
+    setLocalFileContent('')
+    const result = await window.glitnir.fs.listDir({ dir })
+    if (result?.success) {
+      setLocalConfigFiles(result.files ?? [])
+      onSave?.({ adminProfilePath: dir })
+    } else {
+      setLocalConfigError(result?.error || 'Erro ao listar arquivos')
+    }
+    setLocalConfigLoading(false)
+  }
+
+  function localFilePath(filename: string) {
+    const dir = localConfigDir.replace(/[\\/]+$/, '')
+    const sep = dir.includes('\\') ? '\\' : '/'
+    return dir + sep + filename
+  }
+
+  async function handleOpenLocalFile(filename: string) {
+    setLocalSelectedFile(filename)
+    setLocalFileContent('')
+    setLocalFileLoading(true)
+    const result = await window.glitnir.fs.readFile({ filePath: localFilePath(filename) })
+    if (result?.success) {
+      setLocalFileContent(result.content ?? '')
+    } else {
+      setLocalFileContent('// Erro ao ler arquivo: ' + (result?.error || ''))
+    }
+    setLocalFileLoading(false)
+  }
+
+  async function handleSaveLocalFile() {
+    if (!localSelectedFile || !localConfigDir) return
+    setLocalFileSaving(true)
+    await window.glitnir.fs.writeFile({ filePath: localFilePath(localSelectedFile), content: localFileContent })
+    setLocalFileSaving(false)
+    setLocalFileSaved(true)
+    setTimeout(() => setLocalFileSaved(false), 2000)
+  }
+
+  function handleAddLocalToModpack() {
+    if (!localSelectedFile || !localFileContent) return
+    const installPath = `BepInEx/config/${localSelectedFile}`
+    if (modpackConfigs.some(c => c.filename === localSelectedFile)) return
+    setModpackConfigs(prev => [...prev, {
+      mod: '',
+      filename: localSelectedFile,
+      installPath,
+      content: localFileContent,
+    }])
   }
 
   async function handlePublish() {
@@ -806,76 +862,93 @@ export default function ModpackEditorView({ config, adminToken }: Props) {
       {/* ── CONFIGS TAB ── */}
       {activeTab === 'configs' && (
         <>
-          {/* Bulk scan card */}
+          {/* Local profile config reader */}
           <div className="admin-section card">
-            <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h3>Descoberta de Configs</h3>
-              <button
-                className="btn-secondary"
-                style={{ fontSize: 13 }}
-                onClick={handleScanAllMods}
-                disabled={scanningAll || modpackMods.filter(m => m.source === 'thunderstore').length === 0}
-              >
-                {scanningAll ? 'Varrendo...' : 'Varrer todos os mods'}
-              </button>
-            </div>
+            <div className="card-header"><h3>Configs do Perfil Local</h3></div>
             <div className="card-body">
-              {scanningAll && (
-                <p className="text-muted" style={{ fontSize: 13 }}>
-                  Varrendo zips de {modpackMods.filter(m => m.source === 'thunderstore').length} mods do Thunderstore...
-                </p>
-              )}
-              {!scanningAll && allModScans.length === 0 && (
-                <p className="text-muted" style={{ fontSize: 13 }}>
-                  Clique em "Varrer todos os mods" para descobrir arquivos .cfg em todos os mods do modpack.
-                </p>
-              )}
-              {allModScans.map((scan, si) => (
-                <div key={`${scan.modName}-${si}`} className="config-suggestion-card">
-                  <div className="suggestion-card-header">
-                    <span>
-                      <strong>{scan.modName}</strong> — {scan.configs.length} arquivo{scan.configs.length > 1 ? 's' : ''} encontrado{scan.configs.length > 1 ? 's' : ''}
-                    </span>
-                    <button
-                      className="btn-secondary"
-                      style={{ fontSize: 12 }}
-                      onClick={() => {
-                        const toAdd = scan.configs
-                          .filter(c => !modpackConfigs.some(mc => mc.filename === c.filename))
-                          .map(c => ({ mod: scan.modName, filename: c.filename, installPath: c.installPath, content: c.content }))
-                        if (toAdd.length > 0) setModpackConfigs(prev => [...prev, ...toAdd])
-                      }}
-                    >
-                      + Adicionar todos
-                    </button>
+              <div className="form-group">
+                <label>Pasta BepInEx/config (r2modman)</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="text"
+                    value={localConfigDir}
+                    onChange={e => setLocalConfigDir(e.target.value)}
+                    placeholder="C:\Users\...\BepInEx\config"
+                    style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }}
+                    onKeyDown={e => e.key === 'Enter' && handleListLocalConfigs()}
+                  />
+                  <button className="btn-ghost" style={{ fontSize: 13, whiteSpace: 'nowrap' }} onClick={handlePickLocalDir}>
+                    Buscar...
+                  </button>
+                  <button className="btn-secondary" style={{ fontSize: 13, whiteSpace: 'nowrap' }} onClick={handleListLocalConfigs} disabled={!localConfigDir.trim() || localConfigLoading}>
+                    {localConfigLoading ? 'Listando...' : 'Listar'}
+                  </button>
+                </div>
+              </div>
+
+              {localConfigError && <p className="text-muted" style={{ color: 'var(--color-error, #e55)', fontSize: 13 }}>{localConfigError}</p>}
+
+              {localConfigFiles.length > 0 && (
+                <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                  {/* File list */}
+                  <div style={{ width: 220, flexShrink: 0 }}>
+                    <p className="text-muted" style={{ fontSize: 11, marginBottom: 4 }}>{localConfigFiles.length} arquivo{localConfigFiles.length > 1 ? 's' : ''}</p>
+                    <div className="cfg-file-list" style={{ maxHeight: 320, overflowY: 'auto' }}>
+                      {localConfigFiles.map(f => {
+                        const inModpack = modpackConfigs.some(c => c.filename === f)
+                        return (
+                          <button
+                            key={f}
+                            type="button"
+                            className={`cfg-file-option ${localSelectedFile === f ? 'active' : ''}`}
+                            onClick={() => handleOpenLocalFile(f)}
+                            style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}
+                          >
+                            <span className="cfg-file-name">{f}</span>
+                            {inModpack && <span className="text-muted" style={{ fontSize: 10 }}>✓ no modpack</span>}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                  <div className="suggestion-file-list">
-                    {scan.configs.map((cfg) => {
-                      const alreadyAdded = modpackConfigs.some(mc => mc.filename === cfg.filename)
-                      return (
-                        <div key={cfg.filename} className="suggestion-file-item">
-                          <span className="suggestion-filename">{cfg.filename}</span>
-                          <span className="text-muted" style={{ fontSize: 11, flex: 1 }}>{cfg.installPath}</span>
-                          {alreadyAdded ? (
-                            <span className="text-muted" style={{ fontSize: 12 }}>✓ já adicionado</span>
-                          ) : (
+
+                  {/* Editor pane */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {localFileLoading && <p className="text-muted" style={{ fontSize: 13 }}>Carregando...</p>}
+                    {!localFileLoading && localSelectedFile && (
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <span style={{ fontSize: 13, fontWeight: 600 }}>{localSelectedFile}</span>
+                          <div style={{ display: 'flex', gap: 8 }}>
                             <button
                               className="btn-ghost"
                               style={{ fontSize: 12 }}
-                              onClick={() => setModpackConfigs(prev => [
-                                ...prev,
-                                { mod: scan.modName, filename: cfg.filename, installPath: cfg.installPath, content: cfg.content },
-                              ])}
+                              onClick={handleAddLocalToModpack}
+                              disabled={modpackConfigs.some(c => c.filename === localSelectedFile)}
                             >
-                              + Adicionar
+                              {modpackConfigs.some(c => c.filename === localSelectedFile) ? '✓ No modpack' : '+ Adicionar ao modpack'}
                             </button>
-                          )}
+                            <button className="btn-secondary" style={{ fontSize: 12 }} onClick={handleSaveLocalFile} disabled={localFileSaving}>
+                              {localFileSaved ? 'Salvo!' : localFileSaving ? 'Salvando...' : 'Salvar no disco'}
+                            </button>
+                          </div>
                         </div>
-                      )
-                    })}
+                        <textarea
+                          className="cfg-edit-textarea"
+                          value={localFileContent}
+                          onChange={e => setLocalFileContent(e.target.value)}
+                          rows={16}
+                          spellCheck={false}
+                          style={{ width: '100%' }}
+                        />
+                      </>
+                    )}
+                    {!localFileLoading && !localSelectedFile && (
+                      <p className="text-muted" style={{ fontSize: 13, paddingTop: 8 }}>Selecione um arquivo à esquerda para editar.</p>
+                    )}
                   </div>
                 </div>
-              ))}
+              )}
             </div>
           </div>
 

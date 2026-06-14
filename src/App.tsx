@@ -293,6 +293,7 @@ export default function App() {
           <ModpackEditorView
             config={config}
             adminToken={adminToken}
+            onSave={handleSaveConfig}
           />
         )}
 

@@ -322,6 +322,49 @@ app.whenReady().then(() => {
     shell.openExternal(url)
   })
 
+  // ── Local filesystem helpers (config editor) ──────────────────────────────
+  ipcMain.handle('fs:pickDir', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: 'Selecionar pasta BepInEx/config',
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('fs:listDir', async (_e, { dir }: { dir: string }) => {
+    try {
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+        return { success: false, error: 'Pasta não encontrada' }
+      }
+      const files = fs.readdirSync(dir)
+        .filter(f => !fs.statSync(path.join(dir, f)).isDirectory())
+        .filter(f => /\.(cfg|json|yaml|yml|ini|toml|txt)$/i.test(f))
+        .sort()
+      return { success: true, files }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('fs:readFile', async (_e, { filePath }: { filePath: string }) => {
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8')
+      return { success: true, content }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('fs:writeFile', async (_e, { filePath, content }: { filePath: string; content: string }) => {
+    try {
+      fs.writeFileSync(filePath, content, 'utf-8')
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
   ipcMain.handle('thunderstore:fetchAll', async () => {
     const axios = require('axios')
     const response = await axios.get('https://thunderstore.io/c/valheim/api/v1/package/', {

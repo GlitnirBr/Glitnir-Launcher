@@ -90,6 +90,7 @@ export default function Sidebar({
           <div className="dropdown">
             <button
               className="dropdown-trigger"
+              aria-expanded={dropdownOpen}
               onClick={() => setDropdownOpen(!dropdownOpen)}
             >
               <span>{selectedModpackData?.name || 'Selecionar...'}</span>

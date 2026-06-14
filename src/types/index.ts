@@ -65,6 +65,8 @@ export interface Config {
   modpackBranch?: string
   /** URL raw do news.json (opcional). */
   newsUrl?: string
+  /** Caminho da pasta BepInEx/config do perfil (r2modman ou outro). Usado pelo editor de configs do admin. */
+  adminProfilePath?: string
 }
 
 export interface PrivateModDownload {
@@ -104,6 +106,12 @@ declare global {
       }
       shell: {
         openExternal: (url: string) => void
+      }
+      fs: {
+        pickDir: () => Promise<string | null>
+        listDir: (args: { dir: string }) => Promise<{ success: boolean; files?: string[]; error?: string }>
+        readFile: (args: { filePath: string }) => Promise<{ success: boolean; content?: string; error?: string }>
+        writeFile: (args: { filePath: string; content: string }) => Promise<{ success: boolean; error?: string }>
       }
       thunderstore: {
         fetchAll: () => Promise<any[]>

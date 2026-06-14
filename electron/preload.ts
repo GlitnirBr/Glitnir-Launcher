@@ -45,6 +45,13 @@ contextBridge.exposeInMainWorld('glitnir', {
     openExternal: (url: string) => ipcRenderer.send('shell:openExternal', url),
   },
 
+  fs: {
+    pickDir: () => ipcRenderer.invoke('fs:pickDir'),
+    listDir: (args: { dir: string }) => ipcRenderer.invoke('fs:listDir', args),
+    readFile: (args: { filePath: string }) => ipcRenderer.invoke('fs:readFile', args),
+    writeFile: (args: { filePath: string; content: string }) => ipcRenderer.invoke('fs:writeFile', args),
+  },
+
   thunderstore: {
     fetchAll: () => ipcRenderer.invoke('thunderstore:fetchAll'),
   },
