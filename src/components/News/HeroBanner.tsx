@@ -1,3 +1,4 @@
+import bannerImg from '../../assets/banner.png'
 import './HeroBanner.css'
 
 interface FeaturedNews {
@@ -17,7 +18,7 @@ interface Props {
 export default function HeroBanner({ featured, fallbackTitle, fallbackSubtitle }: Props) {
   const title = featured?.title || fallbackTitle || 'Bem-vindo ao Glitnir'
   const subtitle = featured?.subtitle || fallbackSubtitle || 'Servidor de Valheim com mods exclusivos'
-  const image = featured?.image
+  const image = featured?.image || bannerImg
   const cta = featured?.cta
   const link = featured?.link
 

@@ -7,7 +7,20 @@ import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated } from './utils/
 import { getAdminModpack, resolvePrivateMod } from './utils/backendApi'
 import { Config, Modpack, Mod, ModpackEntry } from './types'
 import { NewsItem } from './components/News'
+import newsColiseuImg from './assets/news-coliseu.png'
 import './App.css'
+
+const FALLBACK_NEWS: NewsItem[] = [
+  {
+    id: 'coliseu-pvp',
+    type: 'event',
+    title: 'Coliseu PvP',
+    date: new Date().toISOString().split('T')[0],
+    time: '20h',
+    summary: 'Toda quarta-feira às 20h. Entrada: 2 Moedas Glitnir. Recompensa: 20 Moedas Glitnir. O último sobrevivente vence!',
+    image: newsColiseuImg,
+  },
+]
 
 const VANILLA: ModpackEntry = { id: 'vanilla', name: 'Vanilla', type: 'vanilla', builtin: true }
 const MAIN: ModpackEntry = { id: 'principal', name: 'Glitnir', type: 'public' }
@@ -114,12 +127,16 @@ export default function App() {
 
   const loadNews = useCallback(async () => {
     const newsUrl = config?.newsUrl
-    if (!newsUrl) return
+    if (!newsUrl) {
+      setNewsData({ news: FALLBACK_NEWS })
+      return
+    }
     try {
       const res = await fetch(newsUrl + '?t=' + Date.now())
       if (res.ok) setNewsData(await res.json())
+      else setNewsData({ news: FALLBACK_NEWS })
     } catch {
-      // ignore
+      setNewsData({ news: FALLBACK_NEWS })
     }
   }, [config])
 
