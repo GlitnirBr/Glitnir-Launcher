@@ -13,6 +13,8 @@ export default function AdminView({ config, onSave }: Props) {
   const [modpackRepo, setModpackRepo] = useState(config.modpackRepo || '')
   const [modpackBranch, setModpackBranch] = useState(config.modpackBranch || 'main')
   const [newsUrl, setNewsUrl] = useState(config.newsUrl || '')
+  const [serverOnline, setServerOnline] = useState(config.serverOnline !== false)
+  const [togglingServer, setTogglingServer] = useState(false)
 
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -23,6 +25,17 @@ export default function AdminView({ config, onSave }: Props) {
     modpackRepo !== (config.modpackRepo || '') ||
     modpackBranch !== (config.modpackBranch || 'main') ||
     newsUrl !== (config.newsUrl || '')
+
+  async function handleToggleServer() {
+    setTogglingServer(true)
+    const next = !serverOnline
+    try {
+      await onSave({ serverOnline: next })
+      setServerOnline(next)
+    } finally {
+      setTogglingServer(false)
+    }
+  }
 
   async function handleSave() {
     setSaving(true)
@@ -47,6 +60,27 @@ export default function AdminView({ config, onSave }: Props) {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+
+      <div className="admin-section card">
+        <div className="card-header"><h3>Status do Servidor</h3></div>
+        <div className="card-body">
+          <div className="server-status-toggle">
+            <div className="server-status-info">
+              <span className={`status-dot-admin ${serverOnline ? 'online' : 'offline'}`} />
+              <span className="server-status-label">
+                Servidor está <strong>{serverOnline ? 'Online' : 'Offline'}</strong>
+              </span>
+            </div>
+            <button
+              className={`toggle-btn ${serverOnline ? 'toggle-online' : 'toggle-offline'}`}
+              onClick={handleToggleServer}
+              disabled={togglingServer}
+            >
+              {togglingServer ? 'Salvando...' : serverOnline ? 'Colocar Offline' : 'Colocar Online'}
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="admin-section card">
         <div className="card-header"><h3>Backend e Repositório</h3></div>

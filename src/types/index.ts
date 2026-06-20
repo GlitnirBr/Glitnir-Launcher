@@ -65,6 +65,8 @@ export interface Config {
   modpackBranch?: string
   /** URL raw do news.json (opcional). */
   newsUrl?: string
+  /** Status do servidor exibido na tela inicial. */
+  serverOnline?: boolean
   /** Caminho da pasta BepInEx/config do perfil (r2modman ou outro). Usado pelo editor de configs do admin. */
   adminProfilePath?: string
 }

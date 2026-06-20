@@ -284,6 +284,7 @@ export default function App() {
             featured={newsData.featured}
             news={regularNews}
             pinnedAlert={pinnedAlert}
+            serverOnline={config?.serverOnline !== false}
           />
         )}
 
