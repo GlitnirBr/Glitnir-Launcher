@@ -13,11 +13,18 @@
   inset: 0;
   background: linear-gradient(
     to right,
-    rgba(8, 14, 22, 0.88) 0%,
-    rgba(8, 14, 22, 0.55) 45%,
-    rgba(8, 14, 22, 0.1) 100%
+    rgba(8, 14, 22, 0.35) 0%,
+    rgba(8, 14, 22, 0.1) 50%,
+    rgba(8, 14, 22, 0.35) 100%
   );
 }
+
+.hero-caption {
+  padding: 14px 28px 4px;
+  flex-shrink: 0;
+}
+.hero-caption .hero-title { font-size: 26px; margin: 0 0 4px; }
+.hero-caption .hero-subtitle { font-size: 13px; color: rgba(255,255,255,0.6); margin: 0; }
 
 /* second gradient: dark bottom for content flow */
 .hero-banner::after {

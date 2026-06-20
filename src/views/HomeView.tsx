@@ -18,7 +18,7 @@ interface Props {
 }
 
 export default function HomeView({ featured, news, pinnedAlert, onDismissAlert, serverOnline = true }: Props) {
-  const displayNews = news.slice(0, 3)
+  const displayNews = news.slice(0, 1)
 
   return (
     <div className="home-view">
