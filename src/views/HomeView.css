@@ -14,7 +14,7 @@
 
 
 /* Section */
-.home-section { display: flex; flex-direction: column; gap: 16px; }
+.home-section { display: flex; flex-direction: column; gap: 16px; flex: 1; min-height: 0; }
 
 .section-title {
   display: flex;
@@ -36,6 +36,8 @@
 .news-grid {
   display: grid;
   grid-template-columns: 1fr;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Server status card */
