@@ -9,6 +9,35 @@ const DATA_PATH = path.join(app.getPath('appData'), 'GlitnirLauncher')
 const CONFIG_FILE = path.join(DATA_PATH, 'config.json')
 const PROFILES_ROOT = path.join(DATA_PATH, 'profiles')
 
+/** Procura um arquivo pelo nome recursivamente; retorna o caminho ou null. */
+function findFileInDir(dir: string, filename: string): string | null {
+  if (!fs.existsSync(dir)) return null
+  for (const entry of fs.readdirSync(dir)) {
+    const full = path.join(dir, entry)
+    const stat = fs.statSync(full)
+    if (stat.isFile() && entry.toLowerCase() === filename.toLowerCase()) return full
+    if (stat.isDirectory()) {
+      const found = findFileInDir(full, filename)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/** Copia uma pasta recursivamente (merge, não substitui pastas). */
+function copyDirRecursive(src: string, dest: string) {
+  fs.mkdirSync(dest, { recursive: true })
+  for (const entry of fs.readdirSync(src)) {
+    const srcPath = path.join(src, entry)
+    const destPath = path.join(dest, entry)
+    if (fs.statSync(srcPath).isDirectory()) {
+      copyDirRecursive(srcPath, destPath)
+    } else {
+      fs.copyFileSync(srcPath, destPath)
+    }
+  }
+}
+
 /** Sanitiza o id do modpack para usar como nome de pasta de perfil. */
 function profileDir(profile: string): string {
   const safe = (profile || 'default').replace(/[^a-zA-Z0-9_-]/g, '_')
@@ -178,6 +207,24 @@ app.whenReady().then(() => {
         const AdmZip = require('adm-zip')
         const zip = new AdmZip(zipPath)
         zip.extractAllTo(modFolder, true)
+
+        // Detect BepInExPack: ZIP contains winhttp.dll → promote framework files to profile root
+        const winhttpInMod = findFileInDir(modFolder, 'winhttp.dll')
+        if (winhttpInMod) {
+          const bepinexRoot = path.dirname(winhttpInMod)
+          const profileRoot = profileDir(profile)
+          // Copy winhttp.dll and doorstop_config.ini to profile root
+          fs.copyFileSync(winhttpInMod, path.join(profileRoot, 'winhttp.dll'))
+          const doorstopIni = path.join(bepinexRoot, 'doorstop_config.ini')
+          if (fs.existsSync(doorstopIni)) {
+            fs.copyFileSync(doorstopIni, path.join(profileRoot, 'doorstop_config.ini'))
+          }
+          // Merge BepInEx/ (core, etc.) into the profile BepInEx folder
+          const bepinexSrc = path.join(bepinexRoot, 'BepInEx')
+          if (fs.existsSync(bepinexSrc)) {
+            copyDirRecursive(bepinexSrc, path.join(profileRoot, 'BepInEx'))
+          }
+        }
       }
 
       fs.unlinkSync(zipPath)
@@ -307,7 +354,34 @@ app.whenReady().then(() => {
       if (mode === 'vanilla') {
         execFile(exe, { detached: true } as any)
       } else {
-        const doorstopDll = path.join(profileDir(profile), 'BepInEx', 'core', 'BepInEx.dll')
+        const profileRoot = profileDir(profile)
+
+        // winhttp.dll must be in the game directory for doorstop to activate.
+        // Check profile root first (new installs), then search plugins as fallback (old installs).
+        let winhttpSrc = path.join(profileRoot, 'winhttp.dll')
+        if (!fs.existsSync(winhttpSrc)) {
+          winhttpSrc = findFileInDir(path.join(profileRoot, 'BepInEx', 'plugins'), 'winhttp.dll') || ''
+        }
+        if (!winhttpSrc || !fs.existsSync(winhttpSrc)) {
+          return { success: false, error: 'winhttp.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
+        }
+        fs.copyFileSync(winhttpSrc, path.join(valheimPath, 'winhttp.dll'))
+
+        // Also copy doorstop_config.ini if present alongside winhttp.dll
+        const doorstopIniSrc = path.join(path.dirname(winhttpSrc), 'doorstop_config.ini')
+        if (fs.existsSync(doorstopIniSrc)) {
+          fs.copyFileSync(doorstopIniSrc, path.join(valheimPath, 'doorstop_config.ini'))
+        }
+
+        // Resolve BepInEx.dll: profile root takes priority, fallback to recursive search
+        let doorstopDll = path.join(profileRoot, 'BepInEx', 'core', 'BepInEx.dll')
+        if (!fs.existsSync(doorstopDll)) {
+          doorstopDll = findFileInDir(path.join(profileRoot, 'BepInEx', 'plugins'), 'BepInEx.dll') || ''
+        }
+        if (!doorstopDll || !fs.existsSync(doorstopDll)) {
+          return { success: false, error: 'BepInEx.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
+        }
+
         const args = ['--doorstop-enable', 'true', '--doorstop-target', doorstopDll]
         execFile(exe, args as any, { detached: true } as any)
       }
