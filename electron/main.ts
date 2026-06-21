@@ -382,13 +382,12 @@ app.whenReady().then(() => {
           fs.copyFileSync(winhttpSrc, winhttpDest)
         }
 
-        // Resolve BepInEx.dll: profile root takes priority, then plugins, then game dir (pre-installed BepInEx).
+        // Resolve BepInEx.dll: profile BepInEx/core/ first, then full profile search, then game dir.
         let doorstopDll = path.join(profileRoot, 'BepInEx', 'core', 'BepInEx.dll')
         if (!fs.existsSync(doorstopDll)) {
-          // Search only inside directories named 'core' to avoid picking the wrong BepInEx.dll
-          const pluginsDir = path.join(profileRoot, 'BepInEx', 'plugins')
-          const coreSearch = findFileInDir(pluginsDir, 'BepInEx.dll')
-          doorstopDll = coreSearch || ''
+          // BepInExPack lives at profile root (R2 structure). Search entire profile dir for BepInEx.dll.
+          const found = findFileInDir(profileRoot, 'BepInEx.dll')
+          doorstopDll = found || ''
         }
         if (!doorstopDll || !fs.existsSync(doorstopDll)) {
           // Last resort: BepInEx already installed in the game dir
@@ -396,7 +395,7 @@ app.whenReady().then(() => {
           doorstopDll = fs.existsSync(gameDirDll) ? gameDirDll : ''
         }
         if (!doorstopDll || !fs.existsSync(doorstopDll)) {
-          return { success: false, error: 'BepInEx.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
+          return { success: false, error: `BepInEx.dll não encontrado. Caminho verificado: ${profileRoot}\\BepInEx\\core\\BepInEx.dll — Reinstale os mods.` }
         }
 
         // Copy doorstop_libs/ from profile to game dir if present (R2ModManager does this too).

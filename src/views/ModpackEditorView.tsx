@@ -702,6 +702,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                       version: packVersion,
                       mods: modpackMods,
                       configs: modpackConfigs,
+                      battlemetricsId: packBattlemetricsId,
                     }
                     setTarget(t)
                   }}

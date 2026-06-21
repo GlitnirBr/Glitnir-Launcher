@@ -3,7 +3,7 @@ import Layout from './components/Layout/Layout'
 import AdminLoginModal from './components/Admin/AdminLoginModal'
 import UpdateNotification from './components/UpdateNotification/UpdateNotification'
 import { HomeView, ModsView, SettingsView, AdminView, ModpackEditorView } from './views'
-import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated } from './utils/modManager'
+import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated, normalizeModpack } from './utils/modManager'
 import { getAdminModpack, getPublicModpack, resolvePrivateMod } from './utils/backendApi'
 import { Config, Modpack, Mod, ModpackEntry } from './types'
 import { NewsItem } from './components/News'
@@ -117,18 +117,18 @@ export default function App() {
         }
         data = await getAdminModpack(adminToken, config.backendUrl)
       } else {
-        // Try backend first (always fresh, no caching issues).
-        // Fall back to GitHub raw if backend endpoint doesn't exist or isn't configured.
+        // Try backend first; fall back to GitHub raw if endpoint doesn't exist or isn't configured.
+        let rawData: any = null
         try {
           if (config.backendUrl) {
-            data = await getPublicModpack(config.backendUrl)
-          } else {
-            throw new Error('no backend')
+            rawData = await getPublicModpack(config.backendUrl)
           }
-        } catch {
+        } catch { /* ignore, will try GitHub */ }
+        if (!rawData) {
           const url = buildModpackRawUrl(config.modpackRepo, config.modpackBranch)
-          data = await fetchModpackFromUrl(url)
+          rawData = await fetchModpackFromUrl(url)
         }
+        data = normalizeModpack(rawData)
       }
 
       setModpackData(data)
@@ -173,12 +173,14 @@ export default function App() {
     if (!config) return
     async function load() {
       try {
-        let data: Modpack
-        if (config!.backendUrl) {
-          data = await getPublicModpack(config!.backendUrl)
-        } else {
-          data = await fetchModpackFromUrl(buildModpackRawUrl(config!.modpackRepo, config!.modpackBranch))
+        let raw: any = null
+        try {
+          if (config!.backendUrl) raw = await getPublicModpack(config!.backendUrl)
+        } catch { /* ignore, will try GitHub */ }
+        if (!raw) {
+          raw = await fetchModpackFromUrl(buildModpackRawUrl(config!.modpackRepo, config!.modpackBranch))
         }
+        const data = normalizeModpack(raw)
         if (data.battlemetricsId) setPublicBattlemetricsId(data.battlemetricsId)
       } catch { /* silently ignore */ }
     }
