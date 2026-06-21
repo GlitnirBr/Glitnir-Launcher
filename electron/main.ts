@@ -379,7 +379,17 @@ app.whenReady().then(() => {
             return { success: false, error: 'winhttp.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
           }
         } else {
-          fs.copyFileSync(winhttpSrc, winhttpDest)
+          try {
+            fs.copyFileSync(winhttpSrc, winhttpDest)
+          } catch (copyErr: any) {
+            // EBUSY: file locked by Windows (previous game session or antivirus).
+            // If the file already exists at the destination it is safe to proceed.
+            if (copyErr.code === 'EBUSY' && fs.existsSync(winhttpDest)) {
+              // already in place — continue
+            } else {
+              throw copyErr
+            }
+          }
         }
 
         // Resolve BepInEx.dll: profile BepInEx/core/ first, then full profile search, then game dir.
@@ -401,7 +411,11 @@ app.whenReady().then(() => {
         // Copy doorstop_libs/ from profile to game dir if present (R2ModManager does this too).
         const doorstopLibsSrc = path.join(profileRoot, 'doorstop_libs')
         if (fs.existsSync(doorstopLibsSrc)) {
-          copyDirRecursive(doorstopLibsSrc, path.join(valheimPath, 'doorstop_libs'))
+          try {
+            copyDirRecursive(doorstopLibsSrc, path.join(valheimPath, 'doorstop_libs'))
+          } catch (e: any) {
+            if (e.code !== 'EBUSY') throw e
+          }
         }
 
         // Write doorstop_config.ini with the absolute path so doorstop can always find BepInEx.
@@ -411,7 +425,11 @@ app.whenReady().then(() => {
           'enabled=true',
           `targetAssembly=${doorstopDll}`,
         ].join('\r\n')
-        fs.writeFileSync(path.join(valheimPath, 'doorstop_config.ini'), doorstopIni)
+        try {
+          fs.writeFileSync(path.join(valheimPath, 'doorstop_config.ini'), doorstopIni)
+        } catch (e: any) {
+          if (e.code !== 'EBUSY') throw e
+        }
 
         const args = ['--doorstop-enable', 'true', '--doorstop-target', doorstopDll]
         execFile(exe, args as any, { detached: true } as any)
