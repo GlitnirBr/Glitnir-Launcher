@@ -3,7 +3,7 @@ import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { execFile } from 'child_process'
+import { spawn } from 'child_process'
 
 const DATA_PATH = path.join(app.getPath('appData'), 'GlitnirLauncher')
 const CONFIG_FILE = path.join(DATA_PATH, 'config.json')
@@ -362,19 +362,17 @@ app.whenReady().then(() => {
         return { success: false, error: 'valheim.exe não encontrado no caminho configurado.' }
       }
       if (mode === 'vanilla') {
-        execFile(exe, { detached: true } as any)
+        spawn(exe, [], { detached: true, stdio: 'ignore', cwd: valheimPath }).unref()
       } else {
         const profileRoot = profileDir(profile)
 
         // winhttp.dll must be in the game directory for doorstop to activate.
-        // Check profile root first (new installs), then plugins, then game dir itself (pre-installed BepInEx).
         let winhttpSrc = path.join(profileRoot, 'winhttp.dll')
         if (!fs.existsSync(winhttpSrc)) {
           winhttpSrc = findFileInDir(path.join(profileRoot, 'BepInEx', 'plugins'), 'winhttp.dll') || ''
         }
         const winhttpDest = path.join(valheimPath, 'winhttp.dll')
         if (!winhttpSrc || !fs.existsSync(winhttpSrc)) {
-          // Last resort: winhttp.dll already present in game dir (manually installed BepInEx)
           if (!fs.existsSync(winhttpDest)) {
             return { success: false, error: 'winhttp.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
           }
@@ -382,25 +380,21 @@ app.whenReady().then(() => {
           try {
             fs.copyFileSync(winhttpSrc, winhttpDest)
           } catch (copyErr: any) {
-            // EBUSY: file locked by Windows (previous game session or antivirus).
-            // If the file already exists at the destination it is safe to proceed.
             if (copyErr.code === 'EBUSY' && fs.existsSync(winhttpDest)) {
-              // already in place — continue
+              // file locked by OS (antivirus/previous session) but already in place — ok
             } else {
               throw copyErr
             }
           }
         }
 
-        // Resolve BepInEx.dll: profile BepInEx/core/ first, then full profile search, then game dir.
+        // Resolve BepInEx.dll
         let doorstopDll = path.join(profileRoot, 'BepInEx', 'core', 'BepInEx.dll')
         if (!fs.existsSync(doorstopDll)) {
-          // BepInExPack lives at profile root (R2 structure). Search entire profile dir for BepInEx.dll.
           const found = findFileInDir(profileRoot, 'BepInEx.dll')
           doorstopDll = found || ''
         }
         if (!doorstopDll || !fs.existsSync(doorstopDll)) {
-          // Last resort: BepInEx already installed in the game dir
           const gameDirDll = path.join(valheimPath, 'BepInEx', 'core', 'BepInEx.dll')
           doorstopDll = fs.existsSync(gameDirDll) ? gameDirDll : ''
         }
@@ -408,7 +402,7 @@ app.whenReady().then(() => {
           return { success: false, error: `BepInEx.dll não encontrado. Caminho verificado: ${profileRoot}\\BepInEx\\core\\BepInEx.dll — Reinstale os mods.` }
         }
 
-        // Copy doorstop_libs/ from profile to game dir if present (R2ModManager does this too).
+        // Copy doorstop_libs/
         const doorstopLibsSrc = path.join(profileRoot, 'doorstop_libs')
         if (fs.existsSync(doorstopLibsSrc)) {
           try {
@@ -418,24 +412,35 @@ app.whenReady().then(() => {
           }
         }
 
-        // Write doorstop_config.ini with the absolute path so doorstop can always find BepInEx.
-        // Do NOT copy the profile's ini — it has a relative path, we need an absolute one.
-        // doorstop v3 reads doorstop_config.ini from the process CWD, so we must
-        // set cwd to the game dir. Also include absolute targetAssembly for safety.
+        // Verify winhttp.dll is actually in the game dir before launching
+        if (!fs.existsSync(winhttpDest)) {
+          return { success: false, error: 'winhttp.dll não pôde ser copiado para a pasta do Valheim. Verifique permissões.' }
+        }
+
+        // Write doorstop_config.ini with absolute targetAssembly path.
         const doorstopIni = [
           '[UnityDoorstop]',
           'enabled=true',
           `targetAssembly=${doorstopDll}`,
           '',
         ].join('\r\n')
-        try {
-          fs.writeFileSync(path.join(valheimPath, 'doorstop_config.ini'), doorstopIni)
-        } catch (e: any) {
-          if (e.code !== 'EBUSY') throw e
+        fs.writeFileSync(path.join(valheimPath, 'doorstop_config.ini'), doorstopIni)
+
+        // Verify the ini was written with the correct content
+        const writtenIni = fs.readFileSync(path.join(valheimPath, 'doorstop_config.ini'), 'utf-8')
+        if (!writtenIni.includes(doorstopDll)) {
+          return { success: false, error: `doorstop_config.ini não pôde ser escrito corretamente. Verifique permissões em: ${valheimPath}` }
         }
 
+        console.log('[launch] profileRoot:', profileRoot)
+        console.log('[launch] doorstopDll:', doorstopDll)
+        console.log('[launch] winhttpDest:', winhttpDest, 'exists:', fs.existsSync(winhttpDest))
+        console.log('[launch] doorstop_config.ini:', writtenIni.replace(/\r\n/g, '\\r\\n'))
+
+        // Launch with cwd=valheimPath so doorstop can find its config files,
+        // plus explicit --doorstop args as fallback.
         const args = ['--doorstop-enable', 'true', '--doorstop-target', doorstopDll]
-        execFile(exe, args as any, { detached: true, cwd: valheimPath } as any)
+        spawn(exe, args, { detached: true, stdio: 'ignore', cwd: valheimPath }).unref()
       }
       win.minimize()
       return { success: true }
