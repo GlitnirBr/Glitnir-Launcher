@@ -437,10 +437,22 @@ app.whenReady().then(() => {
         console.log('[launch] winhttpDest:', winhttpDest, 'exists:', fs.existsSync(winhttpDest))
         console.log('[launch] doorstop_config.ini:', writtenIni.replace(/\r\n/g, '\\r\\n'))
 
-        // Launch with cwd=valheimPath so doorstop can find its config files,
-        // plus explicit --doorstop args as fallback.
-        const args = ['--doorstop-enable', 'true', '--doorstop-target', doorstopDll]
-        spawn(exe, args, { detached: true, stdio: 'ignore', cwd: valheimPath }).unref()
+        // Also write a debug bat for manual testing
+        const debugBat = [
+          '@echo off',
+          `cd /d "${valheimPath}"`,
+          `start "" "${exe}" --doorstop-enable true --doorstop-target "${doorstopDll}"`,
+        ].join('\r\n')
+        fs.writeFileSync(path.join(profileRoot, 'launch_debug.bat'), debugBat)
+
+        // Launch via cmd.exe /c start so Windows handles the process creation natively.
+        // This behaves the same as double-clicking the exe from Explorer.
+        // No doorstop CLI args — rely solely on winhttp.dll + doorstop_config.ini.
+        spawn('cmd.exe', ['/d', '/c', 'start', '""', exe], {
+          detached: true,
+          stdio: 'ignore',
+          cwd: valheimPath,
+        }).unref()
       }
       win.minimize()
       return { success: true }
