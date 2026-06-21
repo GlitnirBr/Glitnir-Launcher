@@ -367,20 +367,26 @@ app.whenReady().then(() => {
         }
         fs.copyFileSync(winhttpSrc, path.join(valheimPath, 'winhttp.dll'))
 
-        // Also copy doorstop_config.ini if present alongside winhttp.dll
-        const doorstopIniSrc = path.join(path.dirname(winhttpSrc), 'doorstop_config.ini')
-        if (fs.existsSync(doorstopIniSrc)) {
-          fs.copyFileSync(doorstopIniSrc, path.join(valheimPath, 'doorstop_config.ini'))
-        }
-
-        // Resolve BepInEx.dll: profile root takes priority, fallback to recursive search
+        // Resolve BepInEx.dll: profile root takes priority, fallback to recursive search in plugins
         let doorstopDll = path.join(profileRoot, 'BepInEx', 'core', 'BepInEx.dll')
         if (!fs.existsSync(doorstopDll)) {
-          doorstopDll = findFileInDir(path.join(profileRoot, 'BepInEx', 'plugins'), 'BepInEx.dll') || ''
+          // Search only inside directories named 'core' to avoid picking the wrong BepInEx.dll
+          const pluginsDir = path.join(profileRoot, 'BepInEx', 'plugins')
+          const coreSearch = findFileInDir(pluginsDir, 'BepInEx.dll')
+          doorstopDll = coreSearch || ''
         }
         if (!doorstopDll || !fs.existsSync(doorstopDll)) {
           return { success: false, error: 'BepInEx.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
         }
+
+        // Write doorstop_config.ini with the absolute path so doorstop can always find BepInEx.
+        // Do NOT copy the profile's ini — it has a relative path that points to the game dir, not the profile.
+        const doorstopIni = [
+          '[UnityDoorstop]',
+          'enabled=true',
+          `targetAssembly=${doorstopDll}`,
+        ].join('\r\n')
+        fs.writeFileSync(path.join(valheimPath, 'doorstop_config.ini'), doorstopIni)
 
         const args = ['--doorstop-enable', 'true', '--doorstop-target', doorstopDll]
         execFile(exe, args as any, { detached: true } as any)

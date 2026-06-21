@@ -57,6 +57,7 @@ export default function App() {
   const [installStatus, setInstallStatus] = useState('')
 
   const [isPlaying, setIsPlaying] = useState(false)
+  const [launchError, setLaunchError] = useState('')
 
   const modpacks: ModpackEntry[] = isAdmin
     ? [VANILLA, MAIN, ADMIN_TEST]
@@ -227,13 +228,17 @@ export default function App() {
     }
 
     setIsPlaying(true)
+    setLaunchError('')
     const mode = selectedModpack === 'vanilla' ? 'vanilla' : 'modded'
-    await window.glitnir.game.launch({
+    const result = await window.glitnir.game.launch({
       valheimPath: config.valheimPath,
       mode,
       profile: selectedModpack,
     })
     setIsPlaying(false)
+    if (result && !result.success) {
+      setLaunchError(result.error || 'Erro ao iniciar o jogo.')
+    }
   }
 
   function handleAdminClick() {
@@ -266,6 +271,15 @@ export default function App() {
 
   return (
     <>
+      {launchError && (
+        <div className="launch-error-overlay" onClick={() => setLaunchError('')}>
+          <div className="launch-error-box" onClick={e => e.stopPropagation()}>
+            <strong>Erro ao iniciar</strong>
+            <p>{launchError}</p>
+            <button onClick={() => setLaunchError('')}>Fechar</button>
+          </div>
+        </div>
+      )}
       <Layout
         currentView={currentView}
         onViewChange={setCurrentView}

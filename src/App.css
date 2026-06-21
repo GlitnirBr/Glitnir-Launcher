@@ -1,1 +1,50 @@
 /* App-level overrides - base styles are in index.css */
+
+.launch-error-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.launch-error-box {
+  background: #1a1f2e;
+  border: 1px solid #c0392b;
+  border-radius: 8px;
+  padding: 24px 28px;
+  max-width: 480px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.launch-error-box strong {
+  color: #e74c3c;
+  font-size: 15px;
+}
+
+.launch-error-box p {
+  color: #ccc;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.launch-error-box button {
+  align-self: flex-end;
+  padding: 6px 16px;
+  background: #2c3347;
+  border: 1px solid #3d4663;
+  border-radius: 4px;
+  color: #ccc;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.launch-error-box button:hover {
+  background: #3a4460;
+}
