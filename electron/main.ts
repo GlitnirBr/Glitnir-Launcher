@@ -38,14 +38,26 @@ function copyDirRecursive(src: string, dest: string) {
   }
 }
 
+/** Retorna a raiz de perfis: config.modsPath se definido, senão o default. */
+function getProfilesRoot(): string {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'))
+      if (cfg.modsPath) return cfg.modsPath
+    }
+  } catch { /* ignore */ }
+  return PROFILES_ROOT
+}
+
 /** Sanitiza o id do modpack para usar como nome de pasta de perfil. */
 function profileDir(profile: string): string {
   const safe = (profile || 'default').replace(/[^a-zA-Z0-9_-]/g, '_')
-  return path.join(PROFILES_ROOT, safe)
+  return path.join(getProfilesRoot(), safe)
 }
 
 function ensureDirs(profile?: string) {
-  const dirs = [DATA_PATH, PROFILES_ROOT]
+  const root = getProfilesRoot()
+  const dirs = [DATA_PATH, root]
   if (profile) {
     const p = profileDir(profile)
     dirs.push(p, path.join(p, 'BepInEx', 'plugins'), path.join(p, 'BepInEx', 'config'))
@@ -180,6 +192,8 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('valheim:autoDetect', () => autoDetectValheim())
+
+  ipcMain.handle('mods:defaultPath', () => PROFILES_ROOT)
 
   ipcMain.handle('dialog:selectValheimPath', async () => {
     const result = await dialog.showOpenDialog(win, {

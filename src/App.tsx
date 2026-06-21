@@ -75,6 +75,7 @@ export default function App() {
         modpackBranch: cfg.modpackBranch || 'main',
         newsUrl: cfg.newsUrl || '',
         selectedModpack: cfg.selectedModpack,
+        modsPath: cfg.modsPath,
       })
       if (cfg.selectedModpack) setSelectedModpack(cfg.selectedModpack)
     } catch {
@@ -229,15 +230,27 @@ export default function App() {
 
     setIsPlaying(true)
     setLaunchError('')
-    const mode = selectedModpack === 'vanilla' ? 'vanilla' : 'modded'
-    const result = await window.glitnir.game.launch({
-      valheimPath: config.valheimPath,
-      mode,
-      profile: selectedModpack,
-    })
-    setIsPlaying(false)
-    if (result && !result.success) {
-      setLaunchError(result.error || 'Erro ao iniciar o jogo.')
+
+    try {
+      // Auto-install mods if any are missing or outdated before launching.
+      const hasPending = selectedModpack !== 'vanilla' && mods.some(m => !m.installed || m.outdated)
+      if (hasPending) {
+        await handleInstallMods()
+      }
+
+      const mode = selectedModpack === 'vanilla' ? 'vanilla' : 'modded'
+      const result = await window.glitnir.game.launch({
+        valheimPath: config.valheimPath,
+        mode,
+        profile: selectedModpack,
+      })
+      if (result && !result.success) {
+        setLaunchError(result.error || 'Erro ao iniciar o jogo.')
+      }
+    } catch (err: any) {
+      setLaunchError(err.message || 'Erro ao instalar mods antes de iniciar.')
+    } finally {
+      setIsPlaying(false)
     }
   }
 

@@ -67,6 +67,8 @@ export interface Config {
   newsUrl?: string
   /** Status do servidor exibido na tela inicial. */
   serverOnline?: boolean
+  /** Pasta onde os perfis/mods são instalados. Default: %APPDATA%\GlitnirLauncher\profiles */
+  modsPath?: string
   /** Caminho da pasta BepInEx/config do perfil (r2modman ou outro). Usado pelo editor de configs do admin. */
   adminProfilePath?: string
 }
@@ -95,6 +97,7 @@ declare global {
         autoDetect: () => Promise<string>
       }
       mods: {
+        defaultPath: () => Promise<string>
         install: (args: { zipPath: string; modName: string; profile: string }) => Promise<{ success: boolean; error?: string }>
         download: (args: { url: string; modName: string; headers?: Record<string, string> }) => Promise<{ success: boolean; tempPath?: string; error?: string }>
         list: (profile: string) => Promise<string[]>
