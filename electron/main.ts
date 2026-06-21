@@ -222,22 +222,18 @@ app.whenReady().then(() => {
         const zip = new AdmZip(zipPath)
         zip.extractAllTo(modFolder, true)
 
-        // Detect BepInExPack: ZIP contains winhttp.dll → promote framework files to profile root
+        // Detect BepInExPack: ZIP contains winhttp.dll → promote ALL framework files to profile root.
+        // R2ModManager copies winhttp.dll, doorstop_config.ini, doorstop_libs/, BepInEx/core/, etc.
+        // to the profile root, then does NOT keep BepInExPack in plugins/.
         const winhttpInMod = findFileInDir(modFolder, 'winhttp.dll')
         if (winhttpInMod) {
           const bepinexRoot = path.dirname(winhttpInMod)
           const profileRoot = profileDir(profile)
-          // Copy winhttp.dll and doorstop_config.ini to profile root
-          fs.copyFileSync(winhttpInMod, path.join(profileRoot, 'winhttp.dll'))
-          const doorstopIni = path.join(bepinexRoot, 'doorstop_config.ini')
-          if (fs.existsSync(doorstopIni)) {
-            fs.copyFileSync(doorstopIni, path.join(profileRoot, 'doorstop_config.ini'))
-          }
-          // Merge BepInEx/ (core, etc.) into the profile BepInEx folder
-          const bepinexSrc = path.join(bepinexRoot, 'BepInEx')
-          if (fs.existsSync(bepinexSrc)) {
-            copyDirRecursive(bepinexSrc, path.join(profileRoot, 'BepInEx'))
-          }
+          // Copy everything at the BepInExPack root level to the profile root
+          // (winhttp.dll, doorstop_config.ini, doorstop_libs/, BepInEx/core/, etc.)
+          copyDirRecursive(bepinexRoot, profileRoot)
+          // Remove BepInExPack from plugins/ — it lives at profile root, not in plugins
+          fs.rmSync(modFolder, { recursive: true, force: true })
         }
       }
 
@@ -403,8 +399,14 @@ app.whenReady().then(() => {
           return { success: false, error: 'BepInEx.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
         }
 
+        // Copy doorstop_libs/ from profile to game dir if present (R2ModManager does this too).
+        const doorstopLibsSrc = path.join(profileRoot, 'doorstop_libs')
+        if (fs.existsSync(doorstopLibsSrc)) {
+          copyDirRecursive(doorstopLibsSrc, path.join(valheimPath, 'doorstop_libs'))
+        }
+
         // Write doorstop_config.ini with the absolute path so doorstop can always find BepInEx.
-        // Do NOT copy the profile's ini — it has a relative path that points to the game dir, not the profile.
+        // Do NOT copy the profile's ini — it has a relative path, we need an absolute one.
         const doorstopIni = [
           '[UnityDoorstop]',
           'enabled=true',

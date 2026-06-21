@@ -59,6 +59,10 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [launchError, setLaunchError] = useState('')
 
+  const [serverOnline, setServerOnline] = useState(false)
+  const [serverPlayers, setServerPlayers] = useState(0)
+  const [serverMaxPlayers, setServerMaxPlayers] = useState(0)
+
   const modpacks: ModpackEntry[] = isAdmin
     ? [VANILLA, MAIN, ADMIN_TEST]
     : [VANILLA, MAIN]
@@ -76,6 +80,7 @@ export default function App() {
         newsUrl: cfg.newsUrl || '',
         selectedModpack: cfg.selectedModpack,
         modsPath: cfg.modsPath,
+        battlemetricsId: cfg.battlemetricsId,
       })
       if (cfg.selectedModpack) setSelectedModpack(cfg.selectedModpack)
     } catch {
@@ -152,6 +157,28 @@ export default function App() {
       loadNews()
     }
   }, [config, loadModpack, loadNews])
+
+  useEffect(() => {
+    const id = config?.battlemetricsId
+    if (!id) return
+
+    async function fetchStatus() {
+      try {
+        const res = await fetch(`https://api.battlemetrics.com/servers/${id}`)
+        if (!res.ok) return
+        const data = await res.json()
+        const attr = data?.data?.attributes
+        if (!attr) return
+        setServerOnline(attr.status === 'online')
+        setServerPlayers(attr.players ?? 0)
+        setServerMaxPlayers(attr.maxPlayers ?? 0)
+      } catch { /* silently ignore */ }
+    }
+
+    fetchStatus()
+    const interval = setInterval(fetchStatus, 60_000)
+    return () => clearInterval(interval)
+  }, [config?.battlemetricsId])
 
   async function handleSaveConfig(updates: Partial<Config>) {
     await window.glitnir.config.save(updates)
@@ -311,7 +338,10 @@ export default function App() {
             featured={newsData.featured}
             news={regularNews}
             pinnedAlert={pinnedAlert}
-            serverOnline={config?.serverOnline !== false}
+            serverOnline={serverOnline}
+            serverPlayers={serverPlayers}
+            serverMaxPlayers={serverMaxPlayers}
+            hasBattlemetrics={!!config?.battlemetricsId}
           />
         )}
 

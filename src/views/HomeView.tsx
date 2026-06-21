@@ -15,9 +15,21 @@ interface Props {
   pinnedAlert?: NewsItem
   onDismissAlert?: () => void
   serverOnline?: boolean
+  serverPlayers?: number
+  serverMaxPlayers?: number
+  hasBattlemetrics?: boolean
 }
 
-export default function HomeView({ featured, news, pinnedAlert, onDismissAlert, serverOnline = true }: Props) {
+export default function HomeView({
+  featured,
+  news,
+  pinnedAlert,
+  onDismissAlert,
+  serverOnline = false,
+  serverPlayers = 0,
+  serverMaxPlayers = 0,
+  hasBattlemetrics = false,
+}: Props) {
   const displayNews = news.slice(0, 1)
 
   return (
@@ -39,20 +51,27 @@ export default function HomeView({ featured, news, pinnedAlert, onDismissAlert, 
             <span className="status-card-title">Status do Servidor</span>
           </div>
           <div className="status-card-body">
-            <div className={`status-indicator ${serverOnline ? 'online' : 'offline'}`}>
-              <span className="status-dot" />
-              <span className="status-text">{serverOnline ? 'Online' : 'Offline'}</span>
-            </div>
-            <div className="status-rows">
-              <div className="status-row">
-                <span className="status-row-label">IP</span>
-                <span className="status-row-value mono">glitnir.valheim.gg</span>
+            {hasBattlemetrics ? (
+              <>
+                <div className={`status-indicator ${serverOnline ? 'online' : 'offline'}`}>
+                  <span className="status-dot" />
+                  <span className="status-text">{serverOnline ? 'Online' : 'Offline'}</span>
+                </div>
+                <div className="status-rows">
+                  <div className="status-row">
+                    <span className="status-row-label">Jogadores</span>
+                    <span className="status-row-value">
+                      {serverPlayers} / {serverMaxPlayers}
+                    </span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="status-indicator offline">
+                <span className="status-dot" />
+                <span className="status-text">Não configurado</span>
               </div>
-              <div className="status-row">
-                <span className="status-row-label">Jogadores</span>
-                <span className="status-row-value">0 / 100</span>
-              </div>
-            </div>
+            )}
           </div>
         </aside>
 

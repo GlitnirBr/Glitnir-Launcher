@@ -69,6 +69,8 @@ export interface Config {
   serverOnline?: boolean
   /** Pasta onde os perfis/mods são instalados. Default: %APPDATA%\GlitnirLauncher\profiles */
   modsPath?: string
+  /** ID do servidor no BattleMetrics para status dinâmico. */
+  battlemetricsId?: string
   /** Caminho da pasta BepInEx/config do perfil (r2modman ou outro). Usado pelo editor de configs do admin. */
   adminProfilePath?: string
 }
