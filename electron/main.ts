@@ -43,7 +43,7 @@ function getProfilesRoot(): string {
   try {
     if (fs.existsSync(CONFIG_FILE)) {
       const cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'))
-      if (cfg.modsPath) return path.join(cfg.modsPath, 'Glitnir')
+      if (cfg.modsPath) return cfg.modsPath
     }
   } catch { /* ignore */ }
   return PROFILES_ROOT
