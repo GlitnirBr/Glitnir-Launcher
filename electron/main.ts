@@ -420,10 +420,13 @@ app.whenReady().then(() => {
 
         // Write doorstop_config.ini with the absolute path so doorstop can always find BepInEx.
         // Do NOT copy the profile's ini — it has a relative path, we need an absolute one.
+        // doorstop v3 reads doorstop_config.ini from the process CWD, so we must
+        // set cwd to the game dir. Also include absolute targetAssembly for safety.
         const doorstopIni = [
           '[UnityDoorstop]',
           'enabled=true',
           `targetAssembly=${doorstopDll}`,
+          '',
         ].join('\r\n')
         try {
           fs.writeFileSync(path.join(valheimPath, 'doorstop_config.ini'), doorstopIni)
@@ -432,7 +435,7 @@ app.whenReady().then(() => {
         }
 
         const args = ['--doorstop-enable', 'true', '--doorstop-target', doorstopDll]
-        execFile(exe, args as any, { detached: true } as any)
+        execFile(exe, args as any, { detached: true, cwd: valheimPath } as any)
       }
       win.minimize()
       return { success: true }
