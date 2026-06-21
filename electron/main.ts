@@ -357,23 +357,33 @@ app.whenReady().then(() => {
         const profileRoot = profileDir(profile)
 
         // winhttp.dll must be in the game directory for doorstop to activate.
-        // Check profile root first (new installs), then search plugins as fallback (old installs).
+        // Check profile root first (new installs), then plugins, then game dir itself (pre-installed BepInEx).
         let winhttpSrc = path.join(profileRoot, 'winhttp.dll')
         if (!fs.existsSync(winhttpSrc)) {
           winhttpSrc = findFileInDir(path.join(profileRoot, 'BepInEx', 'plugins'), 'winhttp.dll') || ''
         }
+        const winhttpDest = path.join(valheimPath, 'winhttp.dll')
         if (!winhttpSrc || !fs.existsSync(winhttpSrc)) {
-          return { success: false, error: 'winhttp.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
+          // Last resort: winhttp.dll already present in game dir (manually installed BepInEx)
+          if (!fs.existsSync(winhttpDest)) {
+            return { success: false, error: 'winhttp.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
+          }
+        } else {
+          fs.copyFileSync(winhttpSrc, winhttpDest)
         }
-        fs.copyFileSync(winhttpSrc, path.join(valheimPath, 'winhttp.dll'))
 
-        // Resolve BepInEx.dll: profile root takes priority, fallback to recursive search in plugins
+        // Resolve BepInEx.dll: profile root takes priority, then plugins, then game dir (pre-installed BepInEx).
         let doorstopDll = path.join(profileRoot, 'BepInEx', 'core', 'BepInEx.dll')
         if (!fs.existsSync(doorstopDll)) {
           // Search only inside directories named 'core' to avoid picking the wrong BepInEx.dll
           const pluginsDir = path.join(profileRoot, 'BepInEx', 'plugins')
           const coreSearch = findFileInDir(pluginsDir, 'BepInEx.dll')
           doorstopDll = coreSearch || ''
+        }
+        if (!doorstopDll || !fs.existsSync(doorstopDll)) {
+          // Last resort: BepInEx already installed in the game dir
+          const gameDirDll = path.join(valheimPath, 'BepInEx', 'core', 'BepInEx.dll')
+          doorstopDll = fs.existsSync(gameDirDll) ? gameDirDll : ''
         }
         if (!doorstopDll || !fs.existsSync(doorstopDll)) {
           return { success: false, error: 'BepInEx.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
