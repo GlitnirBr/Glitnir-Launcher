@@ -4,7 +4,7 @@ import AdminLoginModal from './components/Admin/AdminLoginModal'
 import UpdateNotification from './components/UpdateNotification/UpdateNotification'
 import { HomeView, ModsView, SettingsView, AdminView, ModpackEditorView } from './views'
 import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated } from './utils/modManager'
-import { getAdminModpack, resolvePrivateMod } from './utils/backendApi'
+import { getAdminModpack, getPublicModpack, resolvePrivateMod } from './utils/backendApi'
 import { Config, Modpack, Mod, ModpackEntry } from './types'
 import { NewsItem } from './components/News'
 import newsColiseuImg from './assets/news-coliseu.png'
@@ -117,8 +117,18 @@ export default function App() {
         }
         data = await getAdminModpack(adminToken, config.backendUrl)
       } else {
-        const url = buildModpackRawUrl(config.modpackRepo, config.modpackBranch)
-        data = await fetchModpackFromUrl(url)
+        // Try backend first (always fresh, no caching issues).
+        // Fall back to GitHub raw if backend endpoint doesn't exist or isn't configured.
+        try {
+          if (config.backendUrl) {
+            data = await getPublicModpack(config.backendUrl)
+          } else {
+            throw new Error('no backend')
+          }
+        } catch {
+          const url = buildModpackRawUrl(config.modpackRepo, config.modpackBranch)
+          data = await fetchModpackFromUrl(url)
+        }
       }
 
       setModpackData(data)
@@ -158,15 +168,23 @@ export default function App() {
     }
   }, [config, loadModpack, loadNews])
 
-  // Fetch the public modpack to extract battlemetricsId.
+  // Fetch the public modpack to extract battlemetricsId (backend first, GitHub fallback).
   useEffect(() => {
     if (!config) return
-    const url = buildModpackRawUrl(config.modpackRepo, config.modpackBranch)
-    fetchModpackFromUrl(url)
-      .then(data => { if (data.battlemetricsId) setPublicBattlemetricsId(data.battlemetricsId) })
-      .catch(() => {})
+    async function load() {
+      try {
+        let data: Modpack
+        if (config!.backendUrl) {
+          data = await getPublicModpack(config!.backendUrl)
+        } else {
+          data = await fetchModpackFromUrl(buildModpackRawUrl(config!.modpackRepo, config!.modpackBranch))
+        }
+        if (data.battlemetricsId) setPublicBattlemetricsId(data.battlemetricsId)
+      } catch { /* silently ignore */ }
+    }
+    load()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config?.modpackRepo, config?.modpackBranch])
+  }, [config?.backendUrl, config?.modpackRepo, config?.modpackBranch])
 
   // Poll BattleMetrics: prefer public modpack ID, fall back to currently loaded modpack.
   useEffect(() => {
@@ -202,7 +220,13 @@ export default function App() {
   }, [publicBattlemetricsId, modpackData?.battlemetricsId])
 
   async function handleSaveConfig(updates: Partial<Config>) {
-    await window.glitnir.config.save(updates)
+    // When modsPath changes, the old installed-mods metadata points to the wrong directory.
+    // Clear it so mods are reinstalled to the new path on next launch.
+    const merged: Partial<Config> = { ...updates }
+    if ('modsPath' in updates && updates.modsPath !== config?.modsPath) {
+      merged.installedByProfile = {}
+    }
+    await window.glitnir.config.save(merged)
     await loadConfig()
   }
 

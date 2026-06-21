@@ -88,7 +88,8 @@ export default function SettingsView({ config, onSave }: Props) {
         </div>
         <div className="card-body">
           <p className="setting-description">
-            Pasta onde os perfis e mods serao instalados.
+            Pasta base para instalacao de mods. Uma subpasta <strong>Glitnir</strong> sera criada automaticamente dentro dela.
+            Ao trocar o caminho, os mods serao reinstalados na nova localizacao.
           </p>
           <div className="path-input-group">
             <input
@@ -108,7 +109,10 @@ export default function SettingsView({ config, onSave }: Props) {
             )}
           </div>
           {defaultModsPath && (
-            <p className="setting-hint">Padrao: {defaultModsPath}</p>
+            <p className="setting-hint">
+              Padrao: {defaultModsPath}
+              {modsPath && ` → pasta atual: ${modsPath}\\Glitnir`}
+            </p>
           )}
         </div>
       </div>

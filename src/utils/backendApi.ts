@@ -21,6 +21,13 @@ export async function login(password: string, backendUrl?: string): Promise<stri
   return data.token
 }
 
+/** Busca o modpack público via backend (sem autenticação). */
+export async function getPublicModpack(backendUrl?: string): Promise<Modpack> {
+  const res = await fetch(`${base(backendUrl)}/modpacks/main`)
+  if (!res.ok) throw new Error('Falha ao buscar modpack público')
+  return res.json()
+}
+
 /** Busca o modpack secreto de admin (requer token válido). */
 export async function getAdminModpack(token: string, backendUrl?: string): Promise<Modpack> {
   const res = await fetch(`${base(backendUrl)}/modpacks/admin`, {
