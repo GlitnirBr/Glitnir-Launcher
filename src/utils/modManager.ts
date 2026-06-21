@@ -27,6 +27,7 @@ export function normalizeModpack(data: any): Modpack {
     updatedAt: data.updatedAt,
     mods: Array.isArray(data.mods) ? data.mods.map(normalizeMod) : [],
     configs: Array.isArray(data.configs) ? data.configs : [],
+    battlemetricsId: data.battlemetricsId,
   }
 }
 

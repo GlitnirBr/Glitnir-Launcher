@@ -80,7 +80,6 @@ export default function App() {
         newsUrl: cfg.newsUrl || '',
         selectedModpack: cfg.selectedModpack,
         modsPath: cfg.modsPath,
-        battlemetricsId: cfg.battlemetricsId,
       })
       if (cfg.selectedModpack) setSelectedModpack(cfg.selectedModpack)
     } catch {
@@ -159,8 +158,13 @@ export default function App() {
   }, [config, loadModpack, loadNews])
 
   useEffect(() => {
-    const id = config?.battlemetricsId
-    if (!id) return
+    const id = modpackData?.battlemetricsId
+    if (!id) {
+      setServerOnline(false)
+      setServerPlayers(0)
+      setServerMaxPlayers(0)
+      return
+    }
 
     async function fetchStatus() {
       try {
@@ -178,7 +182,7 @@ export default function App() {
     fetchStatus()
     const interval = setInterval(fetchStatus, 60_000)
     return () => clearInterval(interval)
-  }, [config?.battlemetricsId])
+  }, [modpackData?.battlemetricsId])
 
   async function handleSaveConfig(updates: Partial<Config>) {
     await window.glitnir.config.save(updates)
@@ -341,7 +345,7 @@ export default function App() {
             serverOnline={serverOnline}
             serverPlayers={serverPlayers}
             serverMaxPlayers={serverMaxPlayers}
-            hasBattlemetrics={!!config?.battlemetricsId}
+            hasBattlemetrics={!!modpackData?.battlemetricsId}
           />
         )}
 

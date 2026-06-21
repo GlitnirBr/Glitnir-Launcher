@@ -10,7 +10,6 @@ interface Props {
 export default function SettingsView({ config, onSave }: Props) {
   const [valheimPath, setValheimPath] = useState(config.valheimPath)
   const [modsPath, setModsPath] = useState(config.modsPath || '')
-  const [battlemetricsId, setBattlemetricsId] = useState(config.battlemetricsId || '')
   const [defaultModsPath, setDefaultModsPath] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -38,7 +37,7 @@ export default function SettingsView({ config, onSave }: Props) {
     setSaving(true)
     setSaved(false)
     try {
-      await onSave({ valheimPath, modsPath: modsPath || undefined, battlemetricsId: battlemetricsId || undefined })
+      await onSave({ valheimPath, modsPath: modsPath || undefined })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } finally {
@@ -48,8 +47,7 @@ export default function SettingsView({ config, onSave }: Props) {
 
   const hasChanges =
     valheimPath !== config.valheimPath ||
-    modsPath !== (config.modsPath || '') ||
-    battlemetricsId !== (config.battlemetricsId || '')
+    modsPath !== (config.modsPath || '')
 
   return (
     <div className="settings-view">
@@ -112,32 +110,6 @@ export default function SettingsView({ config, onSave }: Props) {
           {defaultModsPath && (
             <p className="setting-hint">Padrao: {defaultModsPath}</p>
           )}
-        </div>
-      </div>
-
-      <div className="settings-section card">
-        <div className="card-header">
-          <h3>BattleMetrics — Status do Servidor</h3>
-        </div>
-        <div className="card-body">
-          <p className="setting-description">
-            ID do servidor no BattleMetrics para exibir status e jogadores em tempo real na tela inicial.
-            Encontre o ID na URL do seu servidor: battlemetrics.com/servers/valheim/<strong>ID</strong>
-          </p>
-          <div className="path-input-group">
-            <input
-              type="text"
-              value={battlemetricsId}
-              onChange={e => setBattlemetricsId(e.target.value)}
-              placeholder="ex: 12345678"
-              className="path-input"
-            />
-            {battlemetricsId && (
-              <button className="btn-ghost" onClick={() => setBattlemetricsId('')}>
-                Remover
-              </button>
-            )}
-          </div>
         </div>
       </div>
 

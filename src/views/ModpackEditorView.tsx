@@ -19,6 +19,7 @@ type PackDraft = {
   name: string
   description: string
   version: string
+  battlemetricsId: string
   mods: Mod[]
   configs: ModConfig[]
 }
@@ -32,6 +33,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [packName, setPackName] = useState('')
   const [packDescription, setPackDescription] = useState('')
   const [packVersion, setPackVersion] = useState('1.0.0')
+  const [packBattlemetricsId, setPackBattlemetricsId] = useState('')
   const [modpackMods, setModpackMods] = useState<Mod[]>([])
   const [modpackConfigs, setModpackConfigs] = useState<ModConfig[]>([])
 
@@ -106,6 +108,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setPackName(draft.name)
     setPackDescription(draft.description)
     setPackVersion(draft.version)
+    setPackBattlemetricsId(draft.battlemetricsId)
     setModpackMods(draft.mods)
     setModpackConfigs(draft.configs)
   }, [])
@@ -132,6 +135,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         name: data?.name || (target === 'admin' ? 'Glitnir Admin' : 'Glitnir'),
         description: data?.description || '',
         version: data?.version || '1.0.0',
+        battlemetricsId: data?.battlemetricsId || '',
         mods: data?.mods || [],
         configs: data?.configs || [],
       }
@@ -142,6 +146,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         name: target === 'admin' ? 'Glitnir Admin' : 'Glitnir',
         description: '',
         version: '1.0.0',
+        battlemetricsId: '',
         mods: [],
         configs: [],
       }
@@ -157,10 +162,11 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       name: packName,
       description: packDescription,
       version: packVersion,
+      battlemetricsId: packBattlemetricsId,
       mods: modpackMods,
       configs: modpackConfigs,
     }
-  }, [target, packName, packDescription, packVersion, modpackMods, modpackConfigs])
+  }, [target, packName, packDescription, packVersion, packBattlemetricsId, modpackMods, modpackConfigs])
 
   const loadMods = useCallback(() => {
     setLoadingMods(true)
@@ -460,6 +466,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         updatedAt: new Date().toISOString(),
         mods: modpackMods,
         configs: modpackConfigs,
+        battlemetricsId: packBattlemetricsId || undefined,
       }, undefined, backendUrl)
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
@@ -707,9 +714,22 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                 <label>Descrição</label>
                 <input type="text" value={packDescription} onChange={e => setPackDescription(e.target.value)} />
               </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
+              <div className="form-group">
                 <label>Versão</label>
                 <input type="text" value={packVersion} onChange={e => setPackVersion(e.target.value)} style={{ width: '150px' }} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>BattleMetrics ID do Servidor</label>
+                <input
+                  type="text"
+                  value={packBattlemetricsId}
+                  onChange={e => setPackBattlemetricsId(e.target.value)}
+                  placeholder="ex: 12345678"
+                  style={{ width: '200px' }}
+                />
+                <span className="form-hint">
+                  Exibe status e jogadores na home para todos. Encontre em battlemetrics.com/servers/valheim/<strong>ID</strong>
+                </span>
               </div>
             </div>
           </div>
