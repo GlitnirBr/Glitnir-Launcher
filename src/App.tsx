@@ -62,6 +62,7 @@ export default function App() {
   const [serverOnline, setServerOnline] = useState(false)
   const [serverPlayers, setServerPlayers] = useState(0)
   const [serverMaxPlayers, setServerMaxPlayers] = useState(0)
+  const [hasBattlemetrics, setHasBattlemetrics] = useState(false)
 
   const modpacks: ModpackEntry[] = isAdmin
     ? [VANILLA, MAIN, ADMIN_TEST]
@@ -157,32 +158,47 @@ export default function App() {
     }
   }, [config, loadModpack, loadNews])
 
+  // Server status always comes from the PUBLIC modpack, regardless of which modpack is selected.
   useEffect(() => {
-    const id = modpackData?.battlemetricsId
-    if (!id) {
-      setServerOnline(false)
-      setServerPlayers(0)
-      setServerMaxPlayers(0)
-      return
-    }
+    if (!config) return
+    const url = buildModpackRawUrl(config.modpackRepo, config.modpackBranch)
 
-    async function fetchStatus() {
+    let cancelled = false
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    async function loadIdAndPoll() {
       try {
-        const res = await fetch(`https://api.battlemetrics.com/servers/${id}`)
-        if (!res.ok) return
-        const data = await res.json()
-        const attr = data?.data?.attributes
-        if (!attr) return
-        setServerOnline(attr.status === 'online')
-        setServerPlayers(attr.players ?? 0)
-        setServerMaxPlayers(attr.maxPlayers ?? 0)
-      } catch { /* silently ignore */ }
+        const data = await fetchModpackFromUrl(url)
+        const id = data.battlemetricsId
+        if (cancelled) return
+        setHasBattlemetrics(!!id)
+        if (!id) return
+
+        async function fetchStatus() {
+          try {
+            const res = await fetch(`https://api.battlemetrics.com/servers/${id}`)
+            if (!res.ok || cancelled) return
+            const json = await res.json()
+            const attr = json?.data?.attributes
+            if (!attr || cancelled) return
+            setServerOnline(attr.status === 'online')
+            setServerPlayers(attr.players ?? 0)
+            setServerMaxPlayers(attr.maxPlayers ?? 0)
+          } catch { /* silently ignore */ }
+        }
+
+        fetchStatus()
+        interval = setInterval(fetchStatus, 60_000)
+      } catch { /* modpack indisponível */ }
     }
 
-    fetchStatus()
-    const interval = setInterval(fetchStatus, 60_000)
-    return () => clearInterval(interval)
-  }, [modpackData?.battlemetricsId])
+    loadIdAndPoll()
+    return () => {
+      cancelled = true
+      if (interval) clearInterval(interval)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config?.modpackRepo, config?.modpackBranch])
 
   async function handleSaveConfig(updates: Partial<Config>) {
     await window.glitnir.config.save(updates)
@@ -345,7 +361,7 @@ export default function App() {
             serverOnline={serverOnline}
             serverPlayers={serverPlayers}
             serverMaxPlayers={serverMaxPlayers}
-            hasBattlemetrics={!!modpackData?.battlemetricsId}
+            hasBattlemetrics={hasBattlemetrics}
           />
         )}
 
