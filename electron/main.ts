@@ -366,93 +366,58 @@ app.whenReady().then(() => {
       } else {
         const profileRoot = profileDir(profile)
 
-        // winhttp.dll must be in the game directory for doorstop to activate.
-        let winhttpSrc = path.join(profileRoot, 'winhttp.dll')
-        if (!fs.existsSync(winhttpSrc)) {
-          winhttpSrc = findFileInDir(path.join(profileRoot, 'BepInEx', 'plugins'), 'winhttp.dll') || ''
-        }
-        const winhttpDest = path.join(valheimPath, 'winhttp.dll')
-        if (!winhttpSrc || !fs.existsSync(winhttpSrc)) {
-          if (!fs.existsSync(winhttpDest)) {
-            return { success: false, error: 'winhttp.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
-          }
-        } else {
-          try {
-            fs.copyFileSync(winhttpSrc, winhttpDest)
-          } catch (copyErr: any) {
-            if (copyErr.code === 'EBUSY' && fs.existsSync(winhttpDest)) {
-              // file locked by OS (antivirus/previous session) but already in place — ok
-            } else {
-              throw copyErr
-            }
-          }
+        // Validate BepInExPack is installed in the profile
+        const bepinexCoreSrc = path.join(profileRoot, 'BepInEx', 'core')
+        const bepinexDllSrc = path.join(bepinexCoreSrc, 'BepInEx.dll')
+        if (!fs.existsSync(bepinexDllSrc)) {
+          return { success: false, error: `BepInEx.dll não encontrado em ${bepinexDllSrc} — Certifique-se de que o BepInExPack está no modpack e reinstale os mods.` }
         }
 
-        // Resolve BepInEx.dll
-        let doorstopDll = path.join(profileRoot, 'BepInEx', 'core', 'BepInEx.dll')
-        if (!fs.existsSync(doorstopDll)) {
-          const found = findFileInDir(profileRoot, 'BepInEx.dll')
-          doorstopDll = found || ''
+        // Copy the full profile into the game directory (same as manual BepInEx install).
+        // This avoids absolute-path issues in doorstop_config.ini and is the most reliable approach.
+        // Profile layout mirrors game dir layout: winhttp.dll, doorstop_libs/, BepInEx/ at root.
+        function tryCopy(src: string, dest: string) {
+          if (!fs.existsSync(src)) return
+          try { fs.copyFileSync(src, dest) } catch (e: any) {
+            if (e.code !== 'EBUSY') throw e
+          }
         }
-        if (!doorstopDll || !fs.existsSync(doorstopDll)) {
-          const gameDirDll = path.join(valheimPath, 'BepInEx', 'core', 'BepInEx.dll')
-          doorstopDll = fs.existsSync(gameDirDll) ? gameDirDll : ''
-        }
-        if (!doorstopDll || !fs.existsSync(doorstopDll)) {
-          return { success: false, error: `BepInEx.dll não encontrado. Caminho verificado: ${profileRoot}\\BepInEx\\core\\BepInEx.dll — Reinstale os mods.` }
-        }
-
-        // Copy doorstop_libs/
-        const doorstopLibsSrc = path.join(profileRoot, 'doorstop_libs')
-        if (fs.existsSync(doorstopLibsSrc)) {
-          try {
-            copyDirRecursive(doorstopLibsSrc, path.join(valheimPath, 'doorstop_libs'))
-          } catch (e: any) {
+        function tryCopyDir(src: string, dest: string) {
+          if (!fs.existsSync(src)) return
+          try { copyDirRecursive(src, dest) } catch (e: any) {
             if (e.code !== 'EBUSY') throw e
           }
         }
 
-        // Verify winhttp.dll is actually in the game dir before launching
-        if (!fs.existsSync(winhttpDest)) {
-          return { success: false, error: 'winhttp.dll não pôde ser copiado para a pasta do Valheim. Verifique permissões.' }
+        tryCopy(path.join(profileRoot, 'winhttp.dll'), path.join(valheimPath, 'winhttp.dll'))
+        tryCopyDir(path.join(profileRoot, 'doorstop_libs'), path.join(valheimPath, 'doorstop_libs'))
+        tryCopyDir(path.join(profileRoot, 'BepInEx'), path.join(valheimPath, 'BepInEx'))
+
+        if (!fs.existsSync(path.join(valheimPath, 'winhttp.dll'))) {
+          return { success: false, error: 'winhttp.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
         }
 
-        // Write doorstop_config.ini with absolute targetAssembly path.
+        // Use the original relative targetAssembly path so doorstop finds BepInEx.dll
+        // relative to the game dir — avoids any backslash escape issues with absolute paths.
         const doorstopIni = [
           '[UnityDoorstop]',
           'enabled=true',
-          `targetAssembly=${doorstopDll}`,
+          'redirect_output_log=false',
+          'ignore_disable_switch=false',
+          'targetAssembly=BepInEx\\core\\BepInEx.dll',
           '',
         ].join('\r\n')
-        fs.writeFileSync(path.join(valheimPath, 'doorstop_config.ini'), doorstopIni)
-
-        // Verify the ini was written with the correct content
-        const writtenIni = fs.readFileSync(path.join(valheimPath, 'doorstop_config.ini'), 'utf-8')
-        if (!writtenIni.includes(doorstopDll)) {
-          return { success: false, error: `doorstop_config.ini não pôde ser escrito corretamente. Verifique permissões em: ${valheimPath}` }
+        try {
+          fs.writeFileSync(path.join(valheimPath, 'doorstop_config.ini'), doorstopIni)
+        } catch (e: any) {
+          if (e.code !== 'EBUSY') throw e
         }
 
         console.log('[launch] profileRoot:', profileRoot)
-        console.log('[launch] doorstopDll:', doorstopDll)
-        console.log('[launch] winhttpDest:', winhttpDest, 'exists:', fs.existsSync(winhttpDest))
-        console.log('[launch] doorstop_config.ini:', writtenIni.replace(/\r\n/g, '\\r\\n'))
+        console.log('[launch] gamedir:', valheimPath)
+        console.log('[launch] BepInEx.dll in game dir exists:', fs.existsSync(path.join(valheimPath, 'BepInEx', 'core', 'BepInEx.dll')))
 
-        // Also write a debug bat for manual testing
-        const debugBat = [
-          '@echo off',
-          `cd /d "${valheimPath}"`,
-          `start "" "${exe}" --doorstop-enable true --doorstop-target "${doorstopDll}"`,
-        ].join('\r\n')
-        fs.writeFileSync(path.join(profileRoot, 'launch_debug.bat'), debugBat)
-
-        // Launch via cmd.exe /c start so Windows handles the process creation natively.
-        // This behaves the same as double-clicking the exe from Explorer.
-        // No doorstop CLI args — rely solely on winhttp.dll + doorstop_config.ini.
-        spawn('cmd.exe', ['/d', '/c', 'start', '""', exe], {
-          detached: true,
-          stdio: 'ignore',
-          cwd: valheimPath,
-        }).unref()
+        spawn(exe, [], { detached: true, stdio: 'ignore', cwd: valheimPath }).unref()
       }
       win.minimize()
       return { success: true }
