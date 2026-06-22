@@ -373,9 +373,7 @@ app.whenReady().then(() => {
           return { success: false, error: `BepInEx.dll não encontrado em ${bepinexDllSrc} — Certifique-se de que o BepInExPack está no modpack e reinstale os mods.` }
         }
 
-        // Copy the full profile into the game directory (same as manual BepInEx install).
-        // This avoids absolute-path issues in doorstop_config.ini and is the most reliable approach.
-        // Profile layout mirrors game dir layout: winhttp.dll, doorstop_libs/, BepInEx/ at root.
+        // Copy profile → game dir (same as manual BepInEx install).
         function tryCopy(src: string, dest: string) {
           if (!fs.existsSync(src)) return
           try { fs.copyFileSync(src, dest) } catch (e: any) {
@@ -389,7 +387,12 @@ app.whenReady().then(() => {
           }
         }
 
-        tryCopy(path.join(profileRoot, 'winhttp.dll'), path.join(valheimPath, 'winhttp.dll'))
+        // Prefer doorstop_libs/x64/winhttp.dll (guaranteed 64-bit proxy for Valheim).
+        // Fall back to profile root winhttp.dll if x64 version not present.
+        const winhttpX64 = path.join(profileRoot, 'doorstop_libs', 'x64', 'winhttp.dll')
+        const winhttpRoot = path.join(profileRoot, 'winhttp.dll')
+        const winhttpSrc = fs.existsSync(winhttpX64) ? winhttpX64 : winhttpRoot
+        tryCopy(winhttpSrc, path.join(valheimPath, 'winhttp.dll'))
         tryCopyDir(path.join(profileRoot, 'doorstop_libs'), path.join(valheimPath, 'doorstop_libs'))
         tryCopyDir(path.join(profileRoot, 'BepInEx'), path.join(valheimPath, 'BepInEx'))
 
@@ -397,27 +400,58 @@ app.whenReady().then(() => {
           return { success: false, error: 'winhttp.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
         }
 
-        // Use the original relative targetAssembly path so doorstop finds BepInEx.dll
-        // relative to the game dir — avoids any backslash escape issues with absolute paths.
-        const doorstopIni = [
-          '[UnityDoorstop]',
-          'enabled=true',
-          'redirect_output_log=false',
-          'ignore_disable_switch=false',
-          'targetAssembly=BepInEx\\core\\BepInEx.dll',
-          '',
-        ].join('\r\n')
-        try {
-          fs.writeFileSync(path.join(valheimPath, 'doorstop_config.ini'), doorstopIni)
-        } catch (e: any) {
-          if (e.code !== 'EBUSY') throw e
+        const bepinexDllDest = path.join(valheimPath, 'BepInEx', 'core', 'BepInEx.dll')
+        if (!fs.existsSync(bepinexDllDest)) {
+          return { success: false, error: `BepInEx.dll não chegou à pasta do Valheim: ${bepinexDllDest}` }
         }
 
-        console.log('[launch] profileRoot:', profileRoot)
-        console.log('[launch] gamedir:', valheimPath)
-        console.log('[launch] BepInEx.dll in game dir exists:', fs.existsSync(path.join(valheimPath, 'BepInEx', 'core', 'BepInEx.dll')))
+        // Write doorstop_config.ini compatible with BOTH doorstop v3 and v4.
+        // The game dir may have either proxy version; writing both sections ensures it works regardless.
+        // v3: reads [UnityDoorstop] → targetAssembly → BepInEx.dll
+        // v4: reads [General]       → target_assembly → BepInEx.Preloader.dll
+        const preloaderDll = 'BepInEx\\core\\BepInEx.Preloader.dll'
+        const coreDll = 'BepInEx\\core\\BepInEx.dll'
+        const iniPath = path.join(valheimPath, 'doorstop_config.ini')
+        if (fs.existsSync(iniPath)) fs.unlinkSync(iniPath)
+        const doorstopIni = [
+          '[General]',
+          'enabled = true',
+          `target_assembly = ${preloaderDll}`,
+          'redirect_output_log = false',
+          'boot_config_override =',
+          'ignore_disable_switch = false',
+          '',
+          '[UnityDoorstop]',
+          'enabled=true',
+          `targetAssembly=${coreDll}`,
+          'redirect_output_log=false',
+          'ignore_disable_switch=false',
+          '',
+        ].join('\r\n')
+        fs.writeFileSync(iniPath, doorstopIni, { encoding: 'utf8' })
 
-        spawn(exe, [], { detached: true, stdio: 'ignore', cwd: valheimPath }).unref()
+        // Verify BepInEx.Preloader.dll (needed by doorstop v4) is in the game dir
+        const preloaderDest = path.join(valheimPath, 'BepInEx', 'core', 'BepInEx.Preloader.dll')
+        const hasPreloader = fs.existsSync(preloaderDest)
+
+        const winhttpSize = fs.statSync(path.join(valheimPath, 'winhttp.dll')).size
+        console.log('[launch] winhttp.dll size:', winhttpSize, 'bytes')
+        console.log('[launch] BepInEx.dll exists:', fs.existsSync(bepinexDllDest))
+        console.log('[launch] BepInEx.Preloader.dll exists:', hasPreloader)
+        console.log('[launch] ini written:', doorstopIni.replace(/\r\n/g, '↵'))
+
+        // Use shell.openPath (ShellExecuteEx) — identical to double-clicking from Explorer.
+        // Write a launch bat to the game dir and open it; this ensures correct CWD and
+        // Windows-native DLL loading without any WSL2 spawn quirks.
+        const batPath = path.join(valheimPath, 'glitnir_launch.bat')
+        const batContent = [
+          '@echo off',
+          `cd /d "${valheimPath}"`,
+          `start "" "${exe}"`,
+          '',
+        ].join('\r\n')
+        fs.writeFileSync(batPath, batContent)
+        shell.openPath(batPath)
       }
       win.minimize()
       return { success: true }
