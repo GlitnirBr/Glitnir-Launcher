@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('glitnir', {
     defaultPath: () => ipcRenderer.invoke('mods:defaultPath'),
     install: (args: { zipPath: string; modName: string; profile: string }) =>
       ipcRenderer.invoke('mods:install', args),
+    bepinexOk: (args: { profile: string }) =>
+      ipcRenderer.invoke('mods:bepinexOk', args),
     download: (args: { url: string; modName: string; headers?: Record<string, string> }) =>
       ipcRenderer.invoke('mods:download', args),
     list: (profile: string) => ipcRenderer.invoke('mods:list', profile),

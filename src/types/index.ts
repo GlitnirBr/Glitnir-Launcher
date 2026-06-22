@@ -100,6 +100,7 @@ declare global {
       mods: {
         defaultPath: () => Promise<string>
         install: (args: { zipPath: string; modName: string; profile: string }) => Promise<{ success: boolean; error?: string }>
+        bepinexOk: (args: { profile: string }) => Promise<boolean>
         download: (args: { url: string; modName: string; headers?: Record<string, string> }) => Promise<{ success: boolean; tempPath?: string; error?: string }>
         list: (profile: string) => Promise<string[]>
         remove: (args: { modName: string; profile: string }) => Promise<{ success: boolean; error?: string }>

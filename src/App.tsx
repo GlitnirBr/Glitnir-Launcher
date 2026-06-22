@@ -117,12 +117,10 @@ export default function App() {
         }
         data = await getAdminModpack(adminToken, config.backendUrl)
       } else {
-        // Try backend first; fall back to GitHub raw if endpoint doesn't exist or isn't configured.
+        // Try backend first (uses DEFAULT_BACKEND_URL when backendUrl is empty); fall back to GitHub raw.
         let rawData: any = null
         try {
-          if (config.backendUrl) {
-            rawData = await getPublicModpack(config.backendUrl)
-          }
+          rawData = await getPublicModpack(config.backendUrl || undefined)
         } catch { /* ignore, will try GitHub */ }
         if (!rawData) {
           const url = buildModpackRawUrl(config.modpackRepo, config.modpackBranch)
@@ -175,7 +173,7 @@ export default function App() {
       try {
         let raw: any = null
         try {
-          if (config!.backendUrl) raw = await getPublicModpack(config!.backendUrl)
+          raw = await getPublicModpack(config!.backendUrl || undefined)
         } catch { /* ignore, will try GitHub */ }
         if (!raw) {
           raw = await fetchModpackFromUrl(buildModpackRawUrl(config!.modpackRepo, config!.modpackBranch))
@@ -238,7 +236,11 @@ export default function App() {
     setInstalling(true)
     try {
       const profile = selectedModpack
-      const toInstall = mods.filter(m => !m.installed || m.outdated)
+      // If BepInEx core files are missing on disk, ignore cached "installed" state and reinstall everything.
+      const bepinexOk = await window.glitnir.mods.bepinexOk({ profile })
+      const toInstall = bepinexOk
+        ? mods.filter(m => !m.installed || m.outdated)
+        : mods
 
       for (let i = 0; i < toInstall.length; i++) {
         const mod = toInstall[i]

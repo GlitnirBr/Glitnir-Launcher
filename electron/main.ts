@@ -338,6 +338,11 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('mods:bepinexOk', (_e, { profile }: { profile: string }) => {
+    const dll = path.join(profileDir(profile), 'BepInEx', 'core', 'BepInEx.dll')
+    return fs.existsSync(dll)
+  })
+
   ipcMain.handle('mods:list', (_e, profile: string) => {
     const pluginsPath = path.join(profileDir(profile), 'BepInEx', 'plugins')
     if (!fs.existsSync(pluginsPath)) return []
