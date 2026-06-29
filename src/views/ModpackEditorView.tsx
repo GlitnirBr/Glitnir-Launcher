@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
 import { fetchModpackFromUrl, buildModpackRawUrl } from '../utils/modManager'
-import { getAdminModpack, publishModpack, uploadPrivateMod, listPrivateMods } from '../utils/backendApi'
+import { getAdminModpack, getPublicModpack, publishModpack, uploadPrivateMod, listPrivateMods } from '../utils/backendApi'
 import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
 
@@ -91,6 +91,10 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
 
   // Per-target drafts — persists unsaved changes when switching between modpacks
   const drafts = useRef<Partial<Record<Target, PackDraft>>>({})
+  // Tracks which targets have had their data fetched at least once.
+  // The draft-sync effect must not write until after the first fetch, otherwise
+  // stale state gets saved as the new target's draft before the server responds.
+  const loadedTargets = useRef<Set<Target>>(new Set())
 
   // Pre-fill localConfigDir from saved config on mount
   useEffect(() => {
@@ -115,9 +119,12 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
 
   const loadModpack = useCallback(async () => {
     setError('')
-    // Restore in-memory draft first — no server round-trip needed
+    // Restore in-memory draft first — no server round-trip needed.
+    // Only use the draft after the target has been loaded at least once;
+    // this prevents stale state written by the draft-sync effect (which runs
+    // when target changes) from blocking the actual server fetch.
     const draft = drafts.current[target]
-    if (draft) {
+    if (draft && loadedTargets.current.has(target)) {
       applyDraft(draft)
       return
     }
@@ -126,10 +133,16 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       let data: Modpack | null = null
       if (target === 'admin') {
         if (!adminToken) return
-        data = await getAdminModpack(adminToken, backendUrl)
+        data = await getAdminModpack(adminToken, backendUrl || undefined)
       } else {
-        const url = buildModpackRawUrl(modpackRepo, modpackBranch)
-        data = await fetchModpackFromUrl(url)
+        // Try backend first (uses DEFAULT_BACKEND_URL when backendUrl is empty); fall back to GitHub.
+        try {
+          data = await getPublicModpack(backendUrl || undefined)
+        } catch { /* ignore */ }
+        if (!data) {
+          const url = buildModpackRawUrl(modpackRepo, modpackBranch)
+          data = await fetchModpackFromUrl(url)
+        }
       }
       const fetched: PackDraft = {
         name: data?.name || (target === 'admin' ? 'Glitnir Admin' : 'Glitnir'),
@@ -139,9 +152,11 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         mods: data?.mods || [],
         configs: data?.configs || [],
       }
+      loadedTargets.current.add(target)
       drafts.current[target] = fetched
       applyDraft(fetched)
     } catch {
+      loadedTargets.current.add(target)
       const fallback: PackDraft = {
         name: target === 'admin' ? 'Glitnir Admin' : 'Glitnir',
         description: '',
@@ -156,8 +171,11 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
 
   useEffect(() => { loadModpack() }, [loadModpack])
 
-  // Keep in-memory draft in sync with every edit so switching never loses work
+  // Keep in-memory draft in sync with every edit so switching never loses work.
+  // Guard: don't write until loadModpack has fetched data for this target at least once,
+  // otherwise changing `target` would snapshot stale state as the new target's draft.
   useEffect(() => {
+    if (!loadedTargets.current.has(target)) return
     drafts.current[target] = {
       name: packName,
       description: packDescription,
