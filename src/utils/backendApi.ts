@@ -117,6 +117,54 @@ export async function uploadPrivateMod(
 }
 
 /**
+ * Faz upload de uma imagem (base64) para o backend, que commita em images/<filename> no repo.
+ * Endpoint: POST /images/upload  →  { url: string } (URL raw do arquivo no GitHub)
+ */
+export async function uploadImage(
+  token: string,
+  filename: string,
+  contentBase64: string,
+  backendUrl?: string,
+): Promise<{ url: string }> {
+  const res = await fetch(`${base(backendUrl)}/images/upload`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ filename, content: contentBase64 }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as any).error || 'Falha ao fazer upload da imagem')
+  }
+  return res.json() as Promise<{ url: string }>
+}
+
+/** Busca as notícias/home data do backend (sem autenticação). */
+export async function getNews(backendUrl?: string): Promise<any> {
+  const res = await fetch(`${base(backendUrl)}/news`)
+  if (!res.ok) throw new Error('Falha ao buscar notícias')
+  return res.json()
+}
+
+/** Publica as notícias/home data no backend (requer token válido). */
+export async function publishNews(token: string, news: object, backendUrl?: string): Promise<void> {
+  const res = await fetch(`${base(backendUrl)}/news`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(news),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as any).error || 'Falha ao publicar notícias')
+  }
+}
+
+/**
  * Resolve a URL/headers de download de um mod privado.
  * O `downloadUrl` do manifesto é um caminho relativo (ex: /mods/private/Foo.zip)
  * que será resolvido contra o backend, com o header de autenticação.

@@ -287,6 +287,23 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('fs:pickImage', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Selecionar imagem',
+      filters: [{ name: 'Imagens', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif'] }],
+      properties: ['openFile'],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const filePath = result.filePaths[0]
+    const stat = fs.statSync(filePath)
+    const content = fs.readFileSync(filePath).toString('base64')
+    return {
+      filename: path.basename(filePath),
+      content,
+      size: stat.size,
+    }
+  })
+
   ipcMain.handle('mods:pickAndRead', async () => {
     const result = await dialog.showOpenDialog(win, {
       title: 'Selecione o arquivo do mod',
@@ -556,6 +573,8 @@ app.whenReady().then(() => {
             file_size: v.file_size,
             dependencies: v.dependencies || [],
           },
+          // Only version_number per version (~8 bytes each) — URL reconstructed via getDownloadUrl
+          versions: (pkg.versions as any[]).map((ver: any) => ({ version_number: ver.version_number })),
         }
       })
   })

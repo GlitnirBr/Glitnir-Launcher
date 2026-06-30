@@ -3,50 +3,62 @@ import './NewsCard.css'
 export interface NewsItem {
   id: string
   type: 'update' | 'event' | 'announcement'
+  category?: 'noticias' | 'eventos' | 'destaque'
   title: string
   date: string
   time?: string
-  summary: string
+  summary?: string
   image?: string
   link?: string
   pinned?: boolean
 }
 
+const CATEGORY_LABELS: Record<string, string> = {
+  noticias: 'NOTÍCIAS',
+  eventos: 'EVENTOS',
+  destaque: 'DESTAQUE',
+  update: 'NOTÍCIAS',
+  event: 'EVENTOS',
+  announcement: 'DESTAQUE',
+}
+
 interface Props {
-  news: NewsItem
+  news: NewsItem | null
+  categoryLabel?: string
 }
 
-const TYPE_LABELS: Record<NewsItem['type'], string> = {
-  update: 'Atualização',
-  event: 'Evento',
-  announcement: 'Aviso',
-}
-
-export default function NewsCard({ news }: Props) {
+export default function NewsCard({ news, categoryLabel }: Props) {
   function handleClick() {
-    if (news.link) window.glitnir.shell.openExternal(news.link)
+    if (news?.link) window.glitnir.shell.openExternal(news.link)
   }
 
-  const formattedDate = new Date(news.date).toLocaleDateString('pt-BR', {
-    day: '2-digit',
-    month: 'short',
-  })
+  const label =
+    categoryLabel ||
+    (news?.category ? CATEGORY_LABELS[news.category] : null) ||
+    (news?.type ? CATEGORY_LABELS[news.type] : 'NOTÍCIAS')
+
+  const formattedDate = news?.date
+    ? new Date(news.date + 'T12:00:00').toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      })
+    : ''
 
   return (
-    <div className={`news-card ${news.link ? 'clickable' : ''}`} onClick={news.link ? handleClick : undefined}>
-      {news.image ? (
-        <div className="news-card-image news-card-image--full" style={{ backgroundImage: `url(${news.image})` }} />
-      ) : (
-        <div className="news-card-content">
-          <div className="news-card-meta">
-            <span className={`badge badge-${news.type}`}>{TYPE_LABELS[news.type]}</span>
-            <span className="news-card-date">{formattedDate}{news.time && ` · ${news.time}`}</span>
-          </div>
-          <h3 className="news-card-title">{news.title}</h3>
-          <p className="news-card-summary">{news.summary}</p>
-          {news.link && <span className="news-card-link">Ler mais →</span>}
+    <div className={`news-card ${news?.link ? 'clickable' : ''}`} onClick={news?.link ? handleClick : undefined}>
+      <div className="news-card-label">{label}</div>
+      <div
+        className="news-card-image"
+        style={news?.image ? { backgroundImage: `url(${news.image})` } : undefined}
+      />
+      <div className="news-card-footer">
+        <p className="news-card-title">{news?.title || ''}</p>
+        <div className="news-card-bottom">
+          <span className="news-card-date">{formattedDate}</span>
+          {news?.link && <span className="news-card-link">Ler mais</span>}
         </div>
-      )}
+      </div>
     </div>
   )
 }

@@ -1,4 +1,7 @@
-import { HeroBanner, NewsCard, PinnedAlert, NewsItem } from '../components/News'
+import { NewsItem } from '../components/News/NewsCard'
+import HeroBanner from '../components/News/HeroBanner'
+import PinnedAlert from '../components/News/PinnedAlert'
+import NewsCard from '../components/News/NewsCard'
 import './HomeView.css'
 
 interface FeaturedNews {
@@ -12,25 +15,31 @@ interface FeaturedNews {
 interface Props {
   featured?: FeaturedNews
   news: NewsItem[]
-  pinnedAlert?: NewsItem
-  onDismissAlert?: () => void
+  pinnedAlert?: { text: string; link?: string }
   serverOnline?: boolean
   serverPlayers?: number
   serverMaxPlayers?: number
   hasBattlemetrics?: boolean
+  serverInfo?: { ip?: string; uptime?: string; version?: string }
 }
 
 export default function HomeView({
   featured,
   news,
   pinnedAlert,
-  onDismissAlert,
   serverOnline = false,
   serverPlayers = 0,
   serverMaxPlayers = 0,
   hasBattlemetrics = false,
+  serverInfo,
 }: Props) {
-  const displayNews = news.slice(0, 1)
+  const noticiaItem = news.find(n => n.category === 'noticias' || n.type === 'update') ?? null
+  const eventosItem = news.find(n => n.category === 'eventos' || n.type === 'event') ?? null
+  const destaqueItem = news.find(n => n.category === 'destaque' || n.type === 'announcement') ?? null
+
+  function copyIp() {
+    if (serverInfo?.ip) navigator.clipboard.writeText(serverInfo.ip).catch(() => {})
+  }
 
   return (
     <div className="home-view">
@@ -40,59 +49,63 @@ export default function HomeView({
         fallbackSubtitle="Servidor de Valheim com raças, classes e aventuras épicas. Junte-se a nós!"
       />
 
-      {pinnedAlert && (
-        <PinnedAlert alert={pinnedAlert} onDismiss={onDismissAlert} />
-      )}
+      {pinnedAlert && <PinnedAlert text={pinnedAlert.text} link={pinnedAlert.link} />}
 
-      <div className="home-content">
-        {/* Server status card */}
-        <aside className="server-status-card">
-          <div className="status-card-header">
-            <span className="status-card-title">Status do Servidor</span>
-          </div>
+      <div className="home-cards-grid">
+        <NewsCard news={noticiaItem} categoryLabel="NOTÍCIAS" />
+        <NewsCard news={eventosItem} categoryLabel="EVENTOS" />
+        <NewsCard news={destaqueItem} categoryLabel="DESTAQUE" />
+
+        <div className="server-status-card">
+          <div className="status-card-header">Status do Servidor</div>
           <div className="status-card-body">
             {hasBattlemetrics ? (
-              <>
-                <div className={`status-indicator ${serverOnline ? 'online' : 'offline'}`}>
-                  <span className="status-dot" />
-                  <span className="status-text">{serverOnline ? 'Online' : 'Offline'}</span>
-                </div>
-                <div className="status-rows">
-                  <div className="status-row">
-                    <span className="status-row-label">Jogadores</span>
-                    <span className="status-row-value">
-                      {serverPlayers} / {serverMaxPlayers}
-                    </span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="status-indicator offline">
+              <div className={`status-indicator-row ${serverOnline ? 'online' : 'offline'}`}>
                 <span className="status-dot" />
-                <span className="status-text">Não configurado</span>
+                <span className="status-label">{serverOnline ? 'Online' : 'Offline'}</span>
+              </div>
+            ) : (
+              <div className="status-indicator-row offline">
+                <span className="status-dot" />
+                <span className="status-label">Não configurado</span>
+              </div>
+            )}
+
+            {serverInfo?.ip && (
+              <div className="status-info-row">
+                <span className="status-info-label">IP</span>
+                <span className="status-info-value mono">{serverInfo.ip}</span>
+                <button className="status-copy-btn" onClick={copyIp} title="Copiar IP">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                </button>
+              </div>
+            )}
+
+            {hasBattlemetrics && (
+              <div className="status-info-row">
+                <span className="status-info-label">Jogadores</span>
+                <span className="status-info-value">{serverPlayers} / {serverMaxPlayers}</span>
+              </div>
+            )}
+
+            {serverInfo?.uptime && (
+              <div className="status-info-row">
+                <span className="status-info-label">Uptime</span>
+                <span className="status-info-value">{serverInfo.uptime}</span>
+              </div>
+            )}
+
+            {serverInfo?.version && (
+              <div className="status-info-row">
+                <span className="status-info-label">Versão</span>
+                <span className="status-info-value mono">{serverInfo.version}</span>
               </div>
             )}
           </div>
-        </aside>
-
-        {/* News section */}
-        {displayNews.length > 0 ? (
-          <section className="home-section">
-            <h2 className="section-title">Notícias do Servidor</h2>
-            <div className="news-grid">
-              {displayNews.map(item => (
-                <NewsCard key={item.id} news={item} />
-              ))}
-            </div>
-          </section>
-        ) : (
-          !featured && (
-            <div className="empty-state">
-              <p>Nenhuma novidade no momento.</p>
-              <span className="text-muted">Configure as notícias no painel admin.</span>
-            </div>
-          )
-        )}
+        </div>
       </div>
     </div>
   )

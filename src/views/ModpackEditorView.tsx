@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
 import { fetchModpackFromUrl, buildModpackRawUrl } from '../utils/modManager'
-import { getAdminModpack, getPublicModpack, publishModpack, uploadPrivateMod, listPrivateMods } from '../utils/backendApi'
+import { getAdminModpack, getPublicModpack, publishModpack, uploadPrivateMod, listPrivateMods, getNews, publishNews, uploadImage } from '../utils/backendApi'
 import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
 
@@ -13,7 +13,7 @@ interface Props {
 }
 
 type Target = 'main' | 'admin'
-type Tab = 'online' | 'modpack' | 'configs'
+type Tab = 'online' | 'modpack' | 'configs' | 'noticias'
 
 type PackDraft = {
   name: string
@@ -36,6 +36,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [packBattlemetricsId, setPackBattlemetricsId] = useState('')
   const [modpackMods, setModpackMods] = useState<Mod[]>([])
   const [modpackConfigs, setModpackConfigs] = useState<ModConfig[]>([])
+
+  // Selected version per mod in the Thunderstore browser (key: full_name), defaults to latest
+  const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({})
 
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'downloads' | 'rating' | 'updated' | 'name'>('downloads')
@@ -88,6 +91,27 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [localFileLoading, setLocalFileLoading] = useState(false)
   const [localFileSaving, setLocalFileSaving] = useState(false)
   const [localFileSaved, setLocalFileSaved] = useState(false)
+
+  // ── News / Home editor state ──────────────────────────────────────────────
+  const [heroTitle, setHeroTitle] = useState('')
+  const [heroSubtitle, setHeroSubtitle] = useState('')
+  const [heroImage, setHeroImage] = useState('')
+  const [heroLink, setHeroLink] = useState('')
+  const [alertText, setAlertText] = useState('')
+  const [alertLink, setAlertLink] = useState('')
+  type NewsCardDraft = { title: string; date: string; image: string; link: string; summary: string }
+  const [cardNoticias, setCardNoticias] = useState<NewsCardDraft>({ title: '', date: '', image: '', link: '', summary: '' })
+  const [cardEventos, setCardEventos] = useState<NewsCardDraft>({ title: '', date: '', image: '', link: '', summary: '' })
+  const [cardDestaque, setCardDestaque] = useState<NewsCardDraft>({ title: '', date: '', image: '', link: '', summary: '' })
+  const [serverIp, setServerIp] = useState('')
+  const [serverUptime, setServerUptime] = useState('')
+  const [serverVersion, setServerVersion] = useState('')
+  const [newsPublishing, setNewsPublishing] = useState(false)
+  const [newsSaved, setNewsSaved] = useState(false)
+  const [newsError, setNewsError] = useState('')
+  // Upload state per image field: key → uploading bool
+  const [imageUploading, setImageUploading] = useState<Record<string, boolean>>({})
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Per-target drafts — persists unsaved changes when switching between modpacks
   const drafts = useRef<Partial<Record<Target, PackDraft>>>({})
@@ -235,12 +259,13 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
 
   function handleAddThunderstoreMod(ts: ThunderstoreMod) {
     if (modpackMods.some(m => m.source === 'thunderstore' && m.namespace === ts.owner && m.name === ts.name)) return
-    const downloadUrl = getDownloadUrl(ts.owner, ts.name, ts.latest.version_number)
+    const version = selectedVersions[ts.full_name] || ts.latest.version_number
+    const downloadUrl = getDownloadUrl(ts.owner, ts.name, version)
     setModpackMods(prev => [...prev, {
       name: ts.name,
       source: 'thunderstore',
       namespace: ts.owner,
-      version: ts.latest.version_number,
+      version,
       downloadUrl,
       description: ts.latest.description?.slice(0, 120),
     }])
@@ -469,6 +494,79 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     }])
   }
 
+  // Load existing news from backend on mount
+  useEffect(() => {
+    if (!adminToken) return
+    getNews(backendUrl || undefined)
+      .then((data: any) => {
+        if (data?.featured) {
+          setHeroTitle(data.featured.title || '')
+          setHeroSubtitle(data.featured.subtitle || '')
+          setHeroImage(data.featured.image || '')
+          setHeroLink(data.featured.link || '')
+        }
+        if (data?.pinnedAlert) {
+          setAlertText(data.pinnedAlert.text || '')
+          setAlertLink(data.pinnedAlert.link || '')
+        }
+        const news: any[] = data?.news || []
+        const n = news.find((x: any) => x.category === 'noticias')
+        const e = news.find((x: any) => x.category === 'eventos')
+        const d = news.find((x: any) => x.category === 'destaque')
+        if (n) setCardNoticias({ title: n.title || '', date: n.date || '', image: n.image || '', link: n.link || '', summary: n.summary || '' })
+        if (e) setCardEventos({ title: e.title || '', date: e.date || '', image: e.image || '', link: e.link || '', summary: e.summary || '' })
+        if (d) setCardDestaque({ title: d.title || '', date: d.date || '', image: d.image || '', link: d.link || '', summary: d.summary || '' })
+        if (data?.serverInfo) {
+          setServerIp(data.serverInfo.ip || '')
+          setServerUptime(data.serverInfo.uptime || '')
+          setServerVersion(data.serverInfo.version || '')
+        }
+      })
+      .catch(() => {}) // silently ignore — editor starts empty if backend has nothing
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken])
+
+  /** Abre o seletor de imagem, faz upload para o backend e chama `onUrl` com a URL retornada. */
+  async function handlePickImage(fieldKey: string, onUrl: (url: string) => void) {
+    if (!adminToken) return
+    const file = await window.glitnir.fs.pickImage()
+    if (!file) return
+    setImageUploading(prev => ({ ...prev, [fieldKey]: true }))
+    try {
+      const result = await uploadImage(adminToken, file.filename, file.content, backendUrl || undefined)
+      onUrl(result.url)
+    } catch (err: any) {
+      setNewsError(err.message || 'Falha ao enviar imagem')
+    } finally {
+      setImageUploading(prev => ({ ...prev, [fieldKey]: false }))
+    }
+  }
+
+  async function handlePublishNews() {
+    if (!adminToken) return
+    setNewsPublishing(true)
+    setNewsError('')
+    setNewsSaved(false)
+    try {
+      const news: any[] = []
+      if (cardNoticias.title) news.push({ id: 'noticias', type: 'update', category: 'noticias', ...cardNoticias })
+      if (cardEventos.title)  news.push({ id: 'eventos',  type: 'event',  category: 'eventos',  ...cardEventos })
+      if (cardDestaque.title) news.push({ id: 'destaque', type: 'announcement', category: 'destaque', ...cardDestaque })
+      await publishNews(adminToken, {
+        featured: { title: heroTitle, subtitle: heroSubtitle, image: heroImage, link: heroLink },
+        pinnedAlert: alertText ? { text: alertText, link: alertLink || undefined } : undefined,
+        news,
+        serverInfo: { ip: serverIp || undefined, uptime: serverUptime || undefined, version: serverVersion || undefined },
+      }, backendUrl || undefined)
+      setNewsSaved(true)
+      setTimeout(() => setNewsSaved(false), 2500)
+    } catch (err: any) {
+      setNewsError(err.message || 'Erro ao publicar notícias')
+    } finally {
+      setNewsPublishing(false)
+    }
+  }
+
   async function handlePublish() {
     if (!adminToken) {
       setError('Sessão de admin expirada. Faça login novamente.')
@@ -517,6 +615,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         </button>
         <button className={`admin-tab ${activeTab === 'configs' ? 'active' : ''}`} onClick={() => setActiveTab('configs')}>
           Configs ({modpackConfigs.length})
+        </button>
+        <button className={`admin-tab ${activeTab === 'noticias' ? 'active' : ''}`} onClick={() => setActiveTab('noticias')}>
+          Notícias / Home
         </button>
       </div>
 
@@ -605,14 +706,30 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                             </div>
                           )}
                         </div>
-                        <button
-                          className={already ? 'btn-ghost' : 'btn-secondary'}
-                          style={{ flexShrink: 0, fontSize: 13 }}
-                          onClick={e => { e.stopPropagation(); handleAddThunderstoreMod(mod) }}
-                          disabled={already}
-                        >
-                          {already ? '✓ No modpack' : '+ Adicionar'}
-                        </button>
+                        <div className="ts-mod-actions" onClick={e => e.stopPropagation()}>
+                          {!already && mod.versions.length > 1 && (
+                            <select
+                              className="version-select-sm"
+                              value={selectedVersions[mod.full_name] || mod.latest.version_number}
+                              onChange={e => setSelectedVersions(prev => ({ ...prev, [mod.full_name]: e.target.value }))}
+                              title="Escolher versão"
+                            >
+                              {mod.versions.map(v => (
+                                <option key={v.version_number} value={v.version_number}>
+                                  {v.version_number === mod.latest.version_number ? `${v.version_number} (latest)` : v.version_number}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          <button
+                            className={already ? 'btn-ghost' : 'btn-secondary'}
+                            style={{ flexShrink: 0, fontSize: 13 }}
+                            onClick={() => handleAddThunderstoreMod(mod)}
+                            disabled={already}
+                          >
+                            {already ? '✓ No modpack' : '+ Adicionar'}
+                          </button>
+                        </div>
                       </div>
                     )
                   })}
@@ -781,10 +898,30 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                             {mod.source === 'private' ? 'privado' : 'thunderstore'}
                           </span>
                         </span>
-                        {mod.source === 'thunderstore' ? (
-                          <input type="text" value={mod.version || ''} className="version-input"
-                            onChange={e => handleUpdateModVersion(index, e.target.value)} />
-                        ) : (
+                        {mod.source === 'thunderstore' ? (() => {
+                          const tsVersions = allMods.find(m => m.name === mod.name && m.owner === mod.namespace)?.versions ?? []
+                          return tsVersions.length > 1 ? (
+                            <select
+                              className="version-select-sm"
+                              value={mod.version || ''}
+                              onChange={e => handleUpdateModVersion(index, e.target.value)}
+                              title="Versão pinada"
+                            >
+                              {tsVersions.map(v => (
+                                <option key={v.version_number} value={v.version_number}>
+                                  {v.version_number}
+                                </option>
+                              ))}
+                              {/* Ensure current version is always an option even if allMods is stale */}
+                              {mod.version && !tsVersions.some(v => v.version_number === mod.version) && (
+                                <option value={mod.version}>{mod.version}</option>
+                              )}
+                            </select>
+                          ) : (
+                            <input type="text" value={mod.version || ''} className="version-input"
+                              onChange={e => handleUpdateModVersion(index, e.target.value)} />
+                          )
+                        })() : (
                           <span className="text-muted">{mod.filename}</span>
                         )}
                       </div>
@@ -1164,6 +1301,130 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
             <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
               onClick={handlePublish} disabled={publishing}>
               {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Glitnir' : 'Glitnir Admin'})`}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* ── NOTÍCIAS TAB ── */}
+      {activeTab === 'noticias' && (
+        <>
+          {/* Hero / Banner */}
+          <div className="admin-section card">
+            <div className="card-header"><h3>Banner Principal (Hero)</h3></div>
+            <div className="card-body">
+              <div className="form-group">
+                <label>Título</label>
+                <input type="text" value={heroTitle} onChange={e => setHeroTitle(e.target.value)} placeholder="Glitnir Fantasy" />
+              </div>
+              <div className="form-group">
+                <label>Subtítulo</label>
+                <input type="text" value={heroSubtitle} onChange={e => setHeroSubtitle(e.target.value)} placeholder="Servidor de Valheim com raças, classes e aventuras épicas." />
+              </div>
+              <div className="form-group">
+                <label>Imagem de fundo</label>
+                <div className="image-upload-row">
+                  <input type="text" value={heroImage} onChange={e => setHeroImage(e.target.value)} placeholder="URL gerada após envio..." style={{ flex: 1 }} readOnly={!!heroImage} />
+                  <button className="btn-ghost" style={{ whiteSpace: 'nowrap', fontSize: 13 }}
+                    onClick={() => handlePickImage('hero', setHeroImage)}
+                    disabled={imageUploading['hero']}>
+                    {imageUploading['hero'] ? 'Enviando...' : heroImage ? '↺ Trocar imagem' : '↑ Selecionar e enviar'}
+                  </button>
+                  {heroImage && <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => setHeroImage('')}>✕</button>}
+                </div>
+                {heroImage && <img src={heroImage} alt="" className="image-preview-thumb" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />}
+                <span className="form-hint">Tamanho recomendado: <strong>1280 × 220 px</strong> (proporção ~5.8:1). JPG, PNG ou WebP.</span>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Link (opcional)</label>
+                <input type="text" value={heroLink} onChange={e => setHeroLink(e.target.value)} placeholder="https://..." />
+              </div>
+            </div>
+          </div>
+
+          {/* Pinned Alert */}
+          <div className="admin-section card">
+            <div className="card-header"><h3>Aviso Fixado (Barra)</h3></div>
+            <div className="card-body">
+              <div className="form-group">
+                <label>Texto do aviso</label>
+                <input type="text" value={alertText} onChange={e => setAlertText(e.target.value)} placeholder="Deixe vazio para ocultar a barra" />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Link (opcional)</label>
+                <input type="text" value={alertLink} onChange={e => setAlertLink(e.target.value)} placeholder="https://..." />
+              </div>
+            </div>
+          </div>
+
+          {/* News Cards */}
+          {(
+            [
+              { label: 'Card — Notícias', state: cardNoticias, set: setCardNoticias },
+              { label: 'Card — Eventos', state: cardEventos, set: setCardEventos },
+              { label: 'Card — Destaque', state: cardDestaque, set: setCardDestaque },
+            ] as const
+          ).map(({ label, state, set }) => (
+            <div className="admin-section card" key={label}>
+              <div className="card-header"><h3>{label}</h3></div>
+              <div className="card-body">
+                <div className="form-group">
+                  <label>Título</label>
+                  <input type="text" value={state.title} onChange={e => set(p => ({ ...p, title: e.target.value }))} placeholder="Título do card" />
+                </div>
+                <div className="form-group">
+                  <label>Data</label>
+                  <input type="text" value={state.date} onChange={e => set(p => ({ ...p, date: e.target.value }))} placeholder="YYYY-MM-DD" />
+                </div>
+                <div className="form-group">
+                  <label>Imagem</label>
+                  <div className="image-upload-row">
+                    <input type="text" value={state.image} onChange={e => set(p => ({ ...p, image: e.target.value }))} placeholder="URL gerada após envio..." style={{ flex: 1 }} readOnly={!!state.image} />
+                    <button className="btn-ghost" style={{ whiteSpace: 'nowrap', fontSize: 13 }}
+                      onClick={() => handlePickImage(label, url => set(p => ({ ...p, image: url })))}
+                      disabled={imageUploading[label]}>
+                      {imageUploading[label] ? 'Enviando...' : state.image ? '↺ Trocar' : '↑ Selecionar e enviar'}
+                    </button>
+                    {state.image && <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => set(p => ({ ...p, image: '' }))}>✕</button>}
+                  </div>
+                  {state.image && <img src={state.image} alt="" className="image-preview-thumb" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />}
+                  <span className="form-hint">Tamanho recomendado: <strong>560 × 150 px</strong> (proporção ~3.7:1). JPG, PNG ou WebP.</span>
+                </div>
+                <div className="form-group">
+                  <label>Link (opcional)</label>
+                  <input type="text" value={state.link} onChange={e => set(p => ({ ...p, link: e.target.value }))} placeholder="https://..." />
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label>Resumo (opcional)</label>
+                  <input type="text" value={state.summary} onChange={e => set(p => ({ ...p, summary: e.target.value }))} placeholder="Descrição curta..." />
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Server Info */}
+          <div className="admin-section card">
+            <div className="card-header"><h3>Informações do Servidor (Card lateral)</h3></div>
+            <div className="card-body">
+              <div className="form-group">
+                <label>IP do servidor</label>
+                <input type="text" value={serverIp} onChange={e => setServerIp(e.target.value)} placeholder="glitnir.gg:2456" style={{ fontFamily: 'monospace' }} />
+              </div>
+              <div className="form-group">
+                <label>Uptime / Temporada</label>
+                <input type="text" value={serverUptime} onChange={e => setServerUptime(e.target.value)} placeholder="Season 3 — 42 dias" />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label>Versão do servidor</label>
+                <input type="text" value={serverVersion} onChange={e => setServerVersion(e.target.value)} placeholder="0.219.14" style={{ fontFamily: 'monospace' }} />
+              </div>
+            </div>
+          </div>
+
+          {newsError && <div className="error-banner" style={{ marginTop: 8 }}>{newsError}</div>}
+          <div className="admin-actions">
+            <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }} onClick={handlePublishNews} disabled={newsPublishing}>
+              {newsPublishing ? 'Publicando...' : newsSaved ? 'Publicado!' : 'Publicar Notícias / Home'}
             </button>
           </div>
         </>

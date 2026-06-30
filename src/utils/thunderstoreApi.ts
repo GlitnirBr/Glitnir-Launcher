@@ -26,6 +26,8 @@ export interface ThunderstoreMod {
   total_downloads: number
   categories: string[]
   latest: VersionInfo
+  /** All available version numbers, newest first. */
+  versions: { version_number: string }[]
 }
 
 let cachedMods: ThunderstoreMod[] | null = null
@@ -82,6 +84,7 @@ export async function fetchAllMods(): Promise<ThunderstoreMod[]> {
             file_size: v.file_size,
             dependencies: v.dependencies || [],
           },
+          versions: (pkg.versions as any[]).map((ver: any) => ({ version_number: ver.version_number })),
         } as ThunderstoreMod
       })
   }

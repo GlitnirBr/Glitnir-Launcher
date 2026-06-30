@@ -116,6 +116,7 @@ declare global {
       }
       fs: {
         pickDir: () => Promise<string | null>
+        pickImage: () => Promise<{ filename: string; content: string; size: number } | null>
         listDir: (args: { dir: string }) => Promise<{ success: boolean; files?: string[]; error?: string }>
         readFile: (args: { filePath: string }) => Promise<{ success: boolean; content?: string; error?: string }>
         writeFile: (args: { filePath: string; content: string }) => Promise<{ success: boolean; error?: string }>

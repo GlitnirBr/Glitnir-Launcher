@@ -34,7 +34,9 @@ interface NewsData {
     link?: string
     cta?: string
   }
+  pinnedAlert?: { text: string; link?: string }
   news: NewsItem[]
+  serverInfo?: { ip?: string; uptime?: string; version?: string }
 }
 
 export default function App() {
@@ -355,7 +357,9 @@ export default function App() {
     )
   }
 
-  const pinnedAlert = newsData.news.find(n => n.pinned)
+  const pinnedAlertItem = newsData.news.find(n => n.pinned)
+  const pinnedAlert = newsData.pinnedAlert ||
+    (pinnedAlertItem ? { text: pinnedAlertItem.title, link: pinnedAlertItem.link } : undefined)
   const regularNews = newsData.news.filter(n => !n.pinned)
 
   return (
@@ -391,6 +395,7 @@ export default function App() {
             serverPlayers={serverPlayers}
             serverMaxPlayers={serverMaxPlayers}
             hasBattlemetrics={!!(publicBattlemetricsId || modpackData?.battlemetricsId)}
+            serverInfo={newsData.serverInfo}
           />
         )}
 

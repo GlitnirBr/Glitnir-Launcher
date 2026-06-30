@@ -17,6 +17,8 @@ interface Props {
 
 export default function HeroBanner({ featured, fallbackTitle, fallbackSubtitle }: Props) {
   const image = featured?.image || bannerImg
+  const title = featured?.title || fallbackTitle || 'Glitnir'
+  const subtitle = featured?.subtitle || fallbackSubtitle
   const cta = featured?.cta
   const link = featured?.link
 
@@ -25,29 +27,24 @@ export default function HeroBanner({ featured, fallbackTitle, fallbackSubtitle }
   }
 
   return (
-    <>
-      <div
-        className="hero-banner"
-        style={{ backgroundImage: `url(${image})` }}
-      >
-        <div className="hero-overlay" />
-        {featured && (
-          <div className="hero-content">
-            <h1 className="hero-title">{featured.title}</h1>
-            {featured.subtitle && <p className="hero-subtitle">{featured.subtitle}</p>}
-            {cta && link && (
-              <button className="hero-cta" onClick={handleClick}>{cta}</button>
-            )}
-          </div>
+    <div
+      className={`hero-banner${link ? ' hero-banner--clickable' : ''}`}
+      style={{ backgroundImage: `url(${image})` }}
+      onClick={link ? handleClick : undefined}
+    >
+      <div className="hero-overlay" />
+      <div className="hero-content">
+        <h1 className="hero-title">{title}</h1>
+        {subtitle && <p className="hero-subtitle">{subtitle}</p>}
+        {cta && link && (
+          <button
+            className="hero-cta"
+            onClick={e => { e.stopPropagation(); handleClick() }}
+          >
+            {cta}
+          </button>
         )}
       </div>
-
-      {!featured && (
-        <div className="hero-caption">
-          <h1 className="hero-title">{fallbackTitle || 'Bem-vindo ao Glitnir'}</h1>
-          <p className="hero-subtitle">{fallbackSubtitle || 'Servidor de Valheim com mods exclusivos'}</p>
-        </div>
-      )}
-    </>
+    </div>
   )
 }

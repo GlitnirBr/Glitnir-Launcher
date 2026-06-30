@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('glitnir', {
 
   fs: {
     pickDir: () => ipcRenderer.invoke('fs:pickDir'),
+    pickImage: () => ipcRenderer.invoke('fs:pickImage'),
     listDir: (args: { dir: string }) => ipcRenderer.invoke('fs:listDir', args),
     readFile: (args: { filePath: string }) => ipcRenderer.invoke('fs:readFile', args),
     writeFile: (args: { filePath: string; content: string }) => ipcRenderer.invoke('fs:writeFile', args),
