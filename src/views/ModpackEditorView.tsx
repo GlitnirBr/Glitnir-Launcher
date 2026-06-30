@@ -72,6 +72,15 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [error, setError] = useState('')
   const [publishing, setPublishing] = useState(false)
 
+  // ── Import / Export state ────────────────────────────────────────────────
+  const [showImportExport, setShowImportExport] = useState(false)
+  const [exportCode, setExportCode] = useState('')
+  const [importCodeInput, setImportCodeInput] = useState('')
+  const [importError, setImportError] = useState('')
+  const [importSuccess, setImportSuccess] = useState('')
+  const [codeCopied, setCodeCopied] = useState(false)
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Config suggestions discovered from mod zip scans
   type ConfigSuggestion = { modName: string; configs: { filename: string; installPath: string; content: string }[] }
   const [suggestedConfigs, setSuggestedConfigs] = useState<ConfigSuggestion[]>([])
@@ -567,6 +576,119 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     }
   }
 
+  /** Constrói o objeto Modpack com o estado atual do draft. */
+  function buildCurrentModpack(): Modpack {
+    return {
+      version: packVersion,
+      name: packName,
+      description: packDescription,
+      mods: modpackMods,
+      configs: modpackConfigs,
+      battlemetricsId: packBattlemetricsId || undefined,
+    }
+  }
+
+  /** Aplica um modpack importado ao estado do editor. */
+  function applyImportedModpack(data: Modpack) {
+    setPackName(data.name || '')
+    setPackDescription(data.description || '')
+    setPackVersion(data.version || '1.0.0')
+    setPackBattlemetricsId(data.battlemetricsId || '')
+    setModpackMods(data.mods || [])
+    setModpackConfigs(data.configs || [])
+    // Mark as loaded so draft sync works correctly
+    loadedTargets.current.add(target)
+  }
+
+  function handleExportCode() {
+    const json = JSON.stringify(buildCurrentModpack(), null, 2)
+    const code = 'GLITNIR-v1-' + btoa(encodeURIComponent(json))
+    setExportCode(code)
+  }
+
+  async function handleExportFile() {
+    const pack = buildCurrentModpack()
+    const json = JSON.stringify(pack, null, 2)
+    const filename = `${pack.name.replace(/\s+/g, '_') || 'modpack'}.glitnir`
+    await window.glitnir.fs.saveFileDialog({ filename, content: json })
+  }
+
+  async function handleImportCode() {
+    setImportError('')
+    setImportSuccess('')
+    const raw = importCodeInput.trim()
+    if (!raw) return
+
+    // ── Formato Glitnir ──────────────────────────────────────────────────────
+    if (raw.startsWith('GLITNIR-v1-')) {
+      try {
+        const data = JSON.parse(decodeURIComponent(atob(raw.slice('GLITNIR-v1-'.length)))) as Modpack
+        if (!data.mods) throw new Error('campo "mods" ausente')
+        applyImportedModpack(data)
+        setImportCodeInput('')
+        const cfgCount = data.configs?.length ?? 0
+        setImportSuccess(`✓ ${data.mods.length} mod${data.mods.length !== 1 ? 's' : ''}${cfgCount ? ` e ${cfgCount} config${cfgCount !== 1 ? 's' : ''}` : ''} importados!`)
+        setTimeout(() => setImportSuccess(''), 3000)
+      } catch (err: any) {
+        setImportError('Código Glitnir inválido: ' + (err.message || ''))
+      }
+      return
+    }
+
+    // ── Formato R2ModManager (ZIP base64 com export.r2x + config/) ──────────
+    const r2Result = await window.glitnir.mods.importR2Code({ code: raw })
+    if (!r2Result.success || !r2Result.mods) {
+      setImportError('Formato não reconhecido. Use um código Glitnir (GLITNIR-v1-…) ou R2ModManager.')
+      return
+    }
+
+    const newMods: Mod[] = r2Result.mods.map(({ namespace, name, version }) => {
+      const ts = allMods.find(m => m.owner === namespace && m.name === name)
+      return {
+        name,
+        source: 'thunderstore' as const,
+        namespace,
+        version,
+        downloadUrl: getDownloadUrl(namespace, name, version),
+        description: ts?.latest.description?.slice(0, 120),
+      }
+    })
+
+    const newConfigs: ModConfig[] = (r2Result.configs ?? []).map(({ filename, installPath, content }) => {
+      // Try to match config to a mod by checking if the filename contains the mod name
+      const matchedMod = newMods.find(m =>
+        filename.toLowerCase().includes(m.name.toLowerCase()) ||
+        filename.toLowerCase().includes((m.namespace ?? '').toLowerCase())
+      )
+      return { mod: matchedMod?.name ?? '', filename, installPath, content }
+    })
+
+    setModpackMods(newMods)
+    if (newConfigs.length > 0) setModpackConfigs(newConfigs)
+    loadedTargets.current.add(target)
+    setImportCodeInput('')
+    const cfgCount = newConfigs.length
+    setImportSuccess(`✓ ${newMods.length} mod${newMods.length !== 1 ? 's' : ''}${cfgCount ? ` e ${cfgCount} config${cfgCount !== 1 ? 's' : ''}` : ''} importados do R2!`)
+    setTimeout(() => setImportSuccess(''), 3000)
+  }
+
+  async function handleImportFile() {
+    setImportError('')
+    setImportSuccess('')
+    const text = await window.glitnir.fs.pickJsonFile()
+    if (!text) return
+    try {
+      const data = JSON.parse(text) as Modpack
+      if (!data.mods) throw new Error('campo "mods" ausente')
+      applyImportedModpack(data)
+      const cfgCount = data.configs?.length ?? 0
+      setImportSuccess(`✓ ${data.mods.length} mod${data.mods.length !== 1 ? 's' : ''}${cfgCount ? ` e ${cfgCount} config${cfgCount !== 1 ? 's' : ''}` : ''} importados!`)
+      setTimeout(() => setImportSuccess(''), 3000)
+    } catch (err: any) {
+      setImportError('Arquivo inválido: ' + (err.message || 'falha ao ler'))
+    }
+  }
+
   async function handlePublish() {
     if (!adminToken) {
       setError('Sessão de admin expirada. Faça login novamente.')
@@ -868,6 +990,92 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* Import / Export */}
+          <div className="admin-section card">
+            <div className="card-header">
+              <h3>Importar / Exportar</h3>
+              <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => { setShowImportExport(v => !v); setExportCode(''); setImportError('') }}>
+                {showImportExport ? 'Fechar ▲' : 'Abrir ▼'}
+              </button>
+            </div>
+            {showImportExport && (
+              <div className="card-body">
+                {/* Export */}
+                <div style={{ marginBottom: 16 }}>
+                  <p className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                    Exporta o modpack atual para compartilhar ou fazer backup.
+                  </p>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button className="btn-secondary" style={{ fontSize: 13 }} onClick={handleExportCode}>
+                      Gerar código
+                    </button>
+                    <button className="btn-ghost" style={{ fontSize: 13 }} onClick={handleExportFile}>
+                      Salvar arquivo (.glitnir)
+                    </button>
+                  </div>
+                  {exportCode && (
+                    <div style={{ marginTop: 10 }}>
+                      <textarea
+                        readOnly
+                        value={exportCode}
+                        rows={3}
+                        className="cfg-edit-textarea"
+                        style={{ width: '100%', fontSize: 11, fontFamily: 'monospace', resize: 'none' }}
+                        onFocus={e => e.target.select()}
+                      />
+                      <button
+                        className="btn-ghost"
+                        style={{ fontSize: 12, marginTop: 6 }}
+                        onClick={() => {
+                          navigator.clipboard.writeText(exportCode).catch(() => {})
+                          setCodeCopied(true)
+                          setTimeout(() => setCodeCopied(false), 2000)
+                        }}
+                      >
+                        {codeCopied ? '✓ Copiado!' : 'Copiar código'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Divider */}
+                <div style={{ borderTop: '1px solid var(--border-color)', marginBottom: 16 }} />
+
+                {/* Import */}
+                <p className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                  Importar sobrescreve o modpack atual com os dados do código ou arquivo.
+                </p>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 240 }}>
+                    <textarea
+                      value={importCodeInput}
+                      onChange={e => setImportCodeInput(e.target.value)}
+                      placeholder="Cole o código GLITNIR-v1-… ou o código de perfil do R2ModManager"
+                      rows={3}
+                      className="cfg-edit-textarea"
+                      style={{ width: '100%', fontSize: 11, fontFamily: 'monospace', resize: 'none' }}
+                    />
+                    <button
+                      className="btn-secondary"
+                      style={{ fontSize: 13, marginTop: 6 }}
+                      onClick={handleImportCode}
+                      disabled={!importCodeInput.trim()}
+                    >
+                      Importar por código
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2 }}>
+                    <button className="btn-ghost" style={{ fontSize: 13 }} onClick={handleImportFile}>
+                      Importar arquivo (.glitnir / .json)
+                    </button>
+                  </div>
+                </div>
+                {importError && <p className="text-error" style={{ fontSize: 12, marginTop: 8 }}>{importError}</p>}
+                {importSuccess && <p style={{ fontSize: 12, marginTop: 8, color: 'var(--accent-green)' }}>{importSuccess}</p>}
+              </div>
+            )}
           </div>
 
           {/* Current modpack mods */}

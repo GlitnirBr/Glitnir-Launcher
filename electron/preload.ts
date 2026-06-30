@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('glitnir', {
       ipcRenderer.invoke('mods:readConfigsFromZip', args),
     pickAndRead: () =>
       ipcRenderer.invoke('mods:pickAndRead'),
+    importR2Code: (args: { code: string }) =>
+      ipcRenderer.invoke('mods:importR2Code', args),
   },
 
   game: {
@@ -54,6 +56,8 @@ contextBridge.exposeInMainWorld('glitnir', {
     listDir: (args: { dir: string }) => ipcRenderer.invoke('fs:listDir', args),
     readFile: (args: { filePath: string }) => ipcRenderer.invoke('fs:readFile', args),
     writeFile: (args: { filePath: string; content: string }) => ipcRenderer.invoke('fs:writeFile', args),
+    pickJsonFile: () => ipcRenderer.invoke('fs:pickJsonFile'),
+    saveFileDialog: (args: { filename: string; content: string }) => ipcRenderer.invoke('fs:saveFileDialog', args),
   },
 
   thunderstore: {

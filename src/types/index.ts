@@ -107,6 +107,7 @@ declare global {
         applyConfig: (args: { profile: string; installPath: string; content: string }) => Promise<{ success: boolean; error?: string }>
         readConfigsFromZip: (args: { url: string }) => Promise<{ success: boolean; configs?: { filename: string; installPath: string; content: string }[]; error?: string }>
         pickAndRead: () => Promise<{ filename: string; content: string; size: number } | null>
+        importR2Code: (args: { code: string }) => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content: string }[]; error?: string }>
       }
       game: {
         launch: (args: { valheimPath: string; mode: 'vanilla' | 'modded'; profile: string }) => Promise<{ success: boolean; error?: string }>
@@ -120,6 +121,8 @@ declare global {
         listDir: (args: { dir: string }) => Promise<{ success: boolean; files?: string[]; error?: string }>
         readFile: (args: { filePath: string }) => Promise<{ success: boolean; content?: string; error?: string }>
         writeFile: (args: { filePath: string; content: string }) => Promise<{ success: boolean; error?: string }>
+        pickJsonFile: () => Promise<string | null>
+        saveFileDialog: (args: { filename: string; content: string }) => Promise<{ success: boolean }>
       }
       thunderstore: {
         fetchAll: () => Promise<any[]>

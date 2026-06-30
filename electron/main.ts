@@ -529,6 +529,85 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('mods:importR2Code', async (_e, { code }: { code: string }) => {
+    try {
+      const AdmZip = require('adm-zip')
+      const zipBuffer = Buffer.from(code.trim(), 'base64')
+      const zip = new AdmZip(zipBuffer)
+      const entry = zip.getEntry('export.r2x')
+      if (!entry) return { success: false, error: 'Arquivo export.r2x não encontrado no código' }
+      const content = zip.readAsText(entry)
+
+      // Parse the r2x YAML format: each mod entry has ModReference and Enabled
+      const result: { namespace: string; name: string; version: string }[] = []
+      let current: { ref?: string; enabled?: boolean } = {}
+
+      function flushCurrent() {
+        if (!current.ref || current.enabled === false) return
+        const parts = current.ref.split('-')
+        if (parts.length >= 3) {
+          result.push({
+            namespace: parts[0],
+            name: parts.slice(1, -1).join('-'),
+            version: parts[parts.length - 1],
+          })
+        }
+      }
+
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim()
+        if (trimmed === '-') { flushCurrent(); current = {} }
+        const refM = trimmed.match(/^ModReference:\s*(.+)$/)
+        const enaM = trimmed.match(/^Enabled:\s*(.+)$/)
+        if (refM) current.ref = refM[1].trim()
+        if (enaM) current.enabled = enaM[1].trim().toLowerCase() !== 'false'
+      }
+      flushCurrent()
+
+      // Extract config files from config/ folder in the ZIP
+      const configs: { filename: string; installPath: string; content: string }[] = []
+      zip.getEntries().forEach((e: any) => {
+        if (!e.isDirectory && e.entryName.startsWith('config/')) {
+          const filename = path.basename(e.entryName)
+          if (!filename) return
+          configs.push({
+            filename,
+            installPath: `BepInEx/config/${filename}`,
+            content: zip.readAsText(e),
+          })
+        }
+      })
+
+      return { success: true, mods: result, configs }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('fs:pickJsonFile', async () => {
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Importar modpack',
+      filters: [{ name: 'Glitnir Modpack', extensions: ['glitnir', 'json'] }],
+      properties: ['openFile'],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    return fs.readFileSync(result.filePaths[0], 'utf-8')
+  })
+
+  ipcMain.handle('fs:saveFileDialog', async (_e, { filename, content }: { filename: string; content: string }) => {
+    const result = await dialog.showSaveDialog(win, {
+      title: 'Exportar modpack',
+      defaultPath: filename,
+      filters: [
+        { name: 'Glitnir Modpack', extensions: ['glitnir'] },
+        { name: 'JSON', extensions: ['json'] },
+      ],
+    })
+    if (result.canceled || !result.filePath) return { success: false }
+    fs.writeFileSync(result.filePath, content, 'utf-8')
+    return { success: true }
+  })
+
   ipcMain.handle('thunderstore:fetchAll', async () => {
     const axios = require('axios')
     const response = await axios.get('https://thunderstore.io/c/valheim/api/v1/package/', {

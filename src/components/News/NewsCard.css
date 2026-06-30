@@ -6,7 +6,6 @@
   border-radius: var(--radius-md);
   overflow: hidden;
   transition: all 0.2s ease;
-  height: 100%;
 }
 .news-card.clickable { cursor: pointer; }
 .news-card.clickable:hover {
@@ -35,12 +34,10 @@
 }
 
 .news-card-footer {
-  flex: 1;
   display: flex;
   flex-direction: column;
   padding: 10px 12px 12px;
   gap: 8px;
-  justify-content: space-between;
 }
 
 .news-card-title {
