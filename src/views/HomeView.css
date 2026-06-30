@@ -7,9 +7,9 @@
 .home-cards-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr minmax(180px, 215px);
+  grid-auto-rows: 210px;
   gap: 12px;
   padding: 12px 20px 16px;
-  align-items: start;
 }
 
 /* Server status card */
@@ -20,6 +20,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  height: 100%;
 }
 
 .status-card-header {
