@@ -29,9 +29,9 @@ export default function HeroBanner({ featured, fallbackTitle, fallbackSubtitle }
   return (
     <div
       className={`hero-banner${link ? ' hero-banner--clickable' : ''}`}
-      style={{ backgroundImage: `url(${image})` }}
       onClick={link ? handleClick : undefined}
     >
+      <div className="hero-bg" style={{ backgroundImage: `url(${image})` }} />
       <div className="hero-overlay" />
       <div className="hero-content">
         <h1 className="hero-title">{title}</h1>

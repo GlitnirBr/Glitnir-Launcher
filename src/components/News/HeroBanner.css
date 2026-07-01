@@ -3,12 +3,24 @@
   width: 100%;
   flex: 1;
   min-height: 180px;
-  background: linear-gradient(135deg, #1a3a6a 0%, #0e2040 100%);
-  background-size: cover;
-  background-position: center;
+  overflow: hidden;
 }
 
 .hero-banner--clickable { cursor: pointer; }
+
+/* Separate, scalable layer for the background image — many banner images (incl. the
+   default fallback) have generous letterboxing/padding baked in for a short strip, which
+   leaves a lot of visible "empty" area once the banner grows to fill free vertical space.
+   Zooming this layer past `cover` crops that padding away without touching the text above. */
+.hero-bg {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #1a3a6a 0%, #0e2040 100%);
+  background-size: cover;
+  background-position: center 55%;
+  transform: scale(1.45);
+  transform-origin: center;
+}
 
 .hero-overlay {
   position: absolute;
