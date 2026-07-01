@@ -134,7 +134,8 @@ export default function App() {
 
       setModpackData(data)
       const installed = config.installedByProfile?.[entry.id] || []
-      setMods(checkOutdated(installed, data))
+      const disabledOptional = config.optionalModsDisabled?.[entry.id] || []
+      setMods(checkOutdated(installed, data, disabledOptional))
     } catch (err) {
       console.error('Falha ao carregar modpack:', err)
       setModpackData(null)
@@ -233,23 +234,37 @@ export default function App() {
     await loadConfig()
   }
 
+  /** Liga/desliga um mod opcional para o perfil atual — reflete na lista e no próximo install. */
+  async function handleToggleOptionalMod(modName: string, enabled: boolean) {
+    const profile = selectedModpack
+    const current = new Set(config?.optionalModsDisabled?.[profile] || [])
+    if (enabled) current.delete(modName)
+    else current.add(modName)
+    await handleSaveConfig({
+      optionalModsDisabled: { ...(config?.optionalModsDisabled || {}), [profile]: Array.from(current) },
+    })
+  }
+
   async function handleInstallMods() {
     if (!modpackData || !config) return
 
     setInstalling(true)
     try {
       const profile = selectedModpack
+      // Optional mods the player turned off are excluded from install/removal accounting,
+      // same as if they weren't in the modpack at all.
+      const activeMods = mods.filter(m => !m.optionalDisabled)
       // If BepInEx core files are missing on disk, ignore cached "installed" state and reinstall everything.
       const bepinexOk = await window.glitnir.mods.bepinexOk({ profile })
       const toInstall = bepinexOk
-        ? mods.filter(m => !m.installed || m.outdated)
-        : mods
+        ? activeMods.filter(m => !m.installed || m.outdated)
+        : activeMods
 
-      // Remove mods that were installed for this profile before but are no longer
-      // part of the modpack (e.g. admin removed them) — otherwise the old plugin
-      // folder stays on disk forever and keeps loading in-game.
+      // Remove mods that were installed for this profile before but are no longer active —
+      // either the admin took them out of the modpack, or the player disabled an optional one.
+      // Otherwise the old plugin folder stays on disk forever and keeps loading in-game.
       const previouslyInstalled = config.installedByProfile?.[profile] || []
-      const currentModNames = new Set(modpackData.mods.map(m => m.name))
+      const currentModNames = new Set(activeMods.map(m => m.name))
       const stale = previouslyInstalled.filter(m => !currentModNames.has(m.name))
       for (const mod of stale) {
         setInstallStatus(`Removendo ${mod.name}...`)
@@ -297,7 +312,7 @@ export default function App() {
       }
 
       // Registra os mods instalados desse perfil.
-      const installedList = modpackData.mods.map(m => ({ name: m.name, version: m.version || '0.0.0' }))
+      const installedList = activeMods.map(m => ({ name: m.name, version: m.version || '0.0.0' }))
       const installedByProfile = { ...(config.installedByProfile || {}), [profile]: installedList }
       await handleSaveConfig({ installedByProfile })
 
@@ -323,7 +338,7 @@ export default function App() {
 
     try {
       // Auto-install mods if any are missing or outdated before launching.
-      const hasPending = selectedModpack !== 'vanilla' && mods.some(m => !m.installed || m.outdated)
+      const hasPending = selectedModpack !== 'vanilla' && mods.some(m => !m.optionalDisabled && (!m.installed || m.outdated))
       if (hasPending) {
         await handleInstallMods()
       }
@@ -422,6 +437,7 @@ export default function App() {
             selectedModpackId={selectedModpack}
             onInstallMods={handleInstallMods}
             installing={installing}
+            onToggleOptionalMod={handleToggleOptionalMod}
           />
         )}
 

@@ -411,6 +411,10 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setModpackMods(modpackMods.filter((_, i) => i !== index))
   }
 
+  function handleToggleOptional(index: number) {
+    setModpackMods(modpackMods.map((m, i) => i === index ? { ...m, optional: !m.optional } : m))
+  }
+
   function handleUpdateModVersion(index: number, version: string) {
     setModpackMods(modpackMods.map((m, i) => {
       if (i !== index) return m
@@ -1188,6 +1192,14 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                           <span className="text-muted">{mod.filename}</span>
                         )}
                       </div>
+                      <label className="mod-optional-toggle" title="Jogadores poderão escolher não instalar esse mod">
+                        <input
+                          type="checkbox"
+                          checked={!!mod.optional}
+                          onChange={() => handleToggleOptional(index)}
+                        />
+                        Opcional
+                      </label>
                       <button className="btn-ghost btn-remove" onClick={() => handleRemoveMod(index)}>Remover</button>
                     </div>
                   ))}

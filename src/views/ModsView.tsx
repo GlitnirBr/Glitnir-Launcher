@@ -4,10 +4,11 @@ import './ModsView.css'
 
 interface Props {
   modpack: Modpack | null
-  mods: (Mod & { installed?: boolean; outdated?: boolean })[]
+  mods: (Mod & { installed?: boolean; outdated?: boolean; optionalDisabled?: boolean })[]
   selectedModpackId: string
   onInstallMods: () => Promise<void>
   installing: boolean
+  onToggleOptionalMod: (modName: string, enabled: boolean) => void
 }
 
 export default function ModsView({
@@ -16,12 +17,13 @@ export default function ModsView({
   selectedModpackId,
   onInstallMods,
   installing,
+  onToggleOptionalMod,
 }: Props) {
   const [error, setError] = useState('')
 
   const isVanilla = selectedModpackId === 'vanilla'
-  const needsUpdate = mods.some(m => m.outdated || !m.installed)
-  const installedCount = mods.filter(m => m.installed && !m.outdated).length
+  const needsUpdate = mods.some(m => !m.optionalDisabled && (m.outdated || !m.installed))
+  const installedCount = mods.filter(m => m.optionalDisabled || (m.installed && !m.outdated)).length
   const totalCount = mods.length
 
   async function handleInstall() {
@@ -124,7 +126,7 @@ export default function ModsView({
               return (
                 <div
                   key={`${mod.name}-${i}`}
-                  className={`mod-item ${mod.installed && !mod.outdated ? 'installed' : ''} ${tsUrl ? 'mod-item-clickable' : ''}`}
+                  className={`mod-item ${mod.installed && !mod.outdated ? 'installed' : ''} ${mod.optionalDisabled ? 'optional-disabled' : ''} ${tsUrl ? 'mod-item-clickable' : ''}`}
                   title={tsUrl ? 'Clique para ver no Thunderstore' : undefined}
                   onClick={() => tsUrl && (window as any).glitnir?.shell?.openExternal(tsUrl)}
                 >
@@ -132,6 +134,7 @@ export default function ModsView({
                     <span className="mod-name">
                       {mod.name}
                       {mod.source === 'private' && <span className="badge badge-warning" style={{ marginLeft: 8 }}>privado</span>}
+                      {mod.optional && <span className="badge badge-announcement" style={{ marginLeft: 8 }}>opcional</span>}
                     </span>
                     <span className="mod-version">{mod.version ? `v${mod.version}` : mod.filename}</span>
                   </div>
@@ -145,9 +148,23 @@ export default function ModsView({
                         </svg>
                       </span>
                     )}
-                    {mod.outdated && <span className="badge badge-warning">Desatualizado</span>}
-                    {!mod.installed && !mod.outdated && <span className="badge badge-announcement">Nao instalado</span>}
-                    {mod.installed && !mod.outdated && <span className="badge badge-update">Instalado</span>}
+                    {mod.optional && (
+                      <label
+                        className="mod-optional-switch"
+                        title={mod.optionalDisabled ? 'Ativar mod opcional' : 'Desativar mod opcional'}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!mod.optionalDisabled}
+                          onChange={e => onToggleOptionalMod(mod.name, e.target.checked)}
+                        />
+                        {mod.optionalDisabled ? 'Desativado' : 'Ativado'}
+                      </label>
+                    )}
+                    {!mod.optionalDisabled && mod.outdated && <span className="badge badge-warning">Desatualizado</span>}
+                    {!mod.optionalDisabled && !mod.installed && !mod.outdated && <span className="badge badge-announcement">Nao instalado</span>}
+                    {!mod.optionalDisabled && mod.installed && !mod.outdated && <span className="badge badge-update">Instalado</span>}
                   </div>
                 </div>
               )

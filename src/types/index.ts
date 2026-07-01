@@ -19,9 +19,13 @@ export interface Mod {
    */
   downloadUrl: string
   description?: string
+  /** Se true, o jogador pode escolher não instalar esse mod (ver ModsView). */
+  optional?: boolean
   // runtime
   installed?: boolean
   outdated?: boolean
+  /** true quando é opcional e o jogador desativou. Calculado em checkOutdated. */
+  optionalDisabled?: boolean
 }
 
 export interface ModConfig {
@@ -57,6 +61,8 @@ export interface Config {
   installedMods: { name: string; version: string }[]
   /** Mods instalados por perfil/modpack (id -> lista). */
   installedByProfile?: Record<string, { name: string; version: string }[]>
+  /** Mods opcionais que o jogador desativou, por perfil/modpack (id -> nomes dos mods). */
+  optionalModsDisabled?: Record<string, string[]>
   selectedModpack?: string
   /** URL base do backend (Cloudflare Worker). */
   backendUrl?: string

@@ -41,6 +41,7 @@ function normalizeMod(m: any): Mod {
     filename: m.filename,
     downloadUrl: m.downloadUrl || '',
     description: m.description,
+    optional: !!m.optional,
   }
 }
 
@@ -58,13 +59,16 @@ export function compareVersions(a?: string, b?: string): number {
 export function checkOutdated(
   installed: { name: string; version: string }[],
   modpack: Modpack,
-): (Mod & { installed: boolean; outdated: boolean })[] {
+  disabledOptional: Set<string> | string[] = [],
+): (Mod & { installed: boolean; outdated: boolean; optionalDisabled: boolean })[] {
+  const disabled = disabledOptional instanceof Set ? disabledOptional : new Set(disabledOptional)
   return modpack.mods.map(mod => {
     const inst = installed.find(m => m.name === mod.name)
     return {
       ...mod,
       installed: !!inst,
       outdated: inst ? compareVersions(inst.version, mod.version) < 0 : false,
+      optionalDisabled: !!mod.optional && disabled.has(mod.name),
     }
   })
 }
