@@ -63,6 +63,15 @@
   min-width: 0;
 }
 
+.btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 38px;
+  padding: 0;
+}
+
 .setting-hint {
   font-size: 12px;
   color: var(--text-secondary);

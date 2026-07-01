@@ -108,6 +108,7 @@ declare global {
         readConfigsFromZip: (args: { url: string }) => Promise<{ success: boolean; configs?: { filename: string; installPath: string; content: string }[]; error?: string }>
         pickAndRead: () => Promise<{ filename: string; content: string; size: number } | null>
         importR2Code: (args: { code: string }) => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content: string }[]; error?: string }>
+        openLog: (args: { valheimPath: string }) => Promise<{ success: boolean; error?: string }>
       }
       game: {
         launch: (args: { valheimPath: string; mode: 'vanilla' | 'modded'; profile: string }) => Promise<{ success: boolean; error?: string }>
@@ -117,6 +118,7 @@ declare global {
       }
       fs: {
         pickDir: () => Promise<string | null>
+        openInExplorer: (args: { dirPath: string }) => Promise<{ success: boolean; error?: string }>
         pickImage: () => Promise<{ filename: string; content: string; size: number } | null>
         listDir: (args: { dir: string }) => Promise<{ success: boolean; files?: string[]; error?: string }>
         readFile: (args: { filePath: string }) => Promise<{ success: boolean; content?: string; error?: string }>

@@ -360,6 +360,25 @@ app.whenReady().then(() => {
     return fs.existsSync(dll)
   })
 
+  ipcMain.handle('mods:openLog', async (_e, { valheimPath }: { valheimPath: string }) => {
+    try {
+      if (!valheimPath) return { success: false, error: 'Caminho do Valheim não configurado.' }
+      // Prefer BepInEx's own log (plugin load errors, exceptions) — fall back to the raw
+      // Unity output log (redirect_output_log in doorstop_config.ini) for earlier crashes.
+      const bepinexLog = path.join(valheimPath, 'BepInEx', 'LogOutput.log')
+      const outputLog = path.join(valheimPath, 'output_log.txt')
+      const logPath = fs.existsSync(bepinexLog) ? bepinexLog : outputLog
+      if (!fs.existsSync(logPath)) {
+        return { success: false, error: 'Nenhum log encontrado ainda. Jogue no modo modado pelo menos uma vez.' }
+      }
+      const err = await shell.openPath(logPath)
+      if (err) return { success: false, error: err }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
   ipcMain.handle('mods:list', (_e, profile: string) => {
     const pluginsPath = path.join(profileDir(profile), 'BepInEx', 'plugins')
     if (!fs.existsSync(pluginsPath)) return []
@@ -435,18 +454,21 @@ app.whenReady().then(() => {
         const coreDll = 'BepInEx\\core\\BepInEx.dll'
         const iniPath = path.join(valheimPath, 'doorstop_config.ini')
         if (fs.existsSync(iniPath)) fs.unlinkSync(iniPath)
+        // redirect_output_log = true: mirrors r2modman's default — writes the raw game/
+        // Unity output to output_log.txt in valheimPath, which captures crashes and errors
+        // that happen before BepInEx's own logger is up. Needed to debug mod issues.
         const doorstopIni = [
           '[General]',
           'enabled = true',
           `target_assembly = ${preloaderDll}`,
-          'redirect_output_log = false',
+          'redirect_output_log = true',
           'boot_config_override =',
           'ignore_disable_switch = false',
           '',
           '[UnityDoorstop]',
           'enabled=true',
           `targetAssembly=${coreDll}`,
-          'redirect_output_log=false',
+          'redirect_output_log=true',
           'ignore_disable_switch=false',
           '',
         ].join('\r\n')
@@ -494,6 +516,18 @@ app.whenReady().then(() => {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     return result.filePaths[0]
+  })
+
+  ipcMain.handle('fs:openInExplorer', async (_e, { dirPath }: { dirPath: string }) => {
+    try {
+      if (!dirPath) return { success: false, error: 'Caminho não definido' }
+      if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
+      const err = await shell.openPath(dirPath)
+      if (err) return { success: false, error: err }
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   })
 
   ipcMain.handle('fs:listDir', async (_e, { dir }: { dir: string }) => {

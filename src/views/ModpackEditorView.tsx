@@ -43,6 +43,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'downloads' | 'rating' | 'updated' | 'name'>('downloads')
   const [categoryFilter, setCategoryFilter] = useState('')
+  const [showDeprecated, setShowDeprecated] = useState(false)
   const [allMods, setAllMods] = useState<ThunderstoreMod[]>([])
   const [loadingMods, setLoadingMods] = useState(false)
   const [modsError, setModsError] = useState('')
@@ -245,6 +246,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const filteredMods = useMemo(() => {
     const q = searchQuery.toLowerCase().trim()
     let source = allMods
+    if (!showDeprecated) {
+      source = source.filter(m => !m.is_deprecated)
+    }
     if (q) {
       source = source.filter(m =>
         m.name.toLowerCase().includes(q) ||
@@ -261,10 +265,10 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     else if (sortBy === 'updated') sorted.sort((a, b) => (b.date_updated ?? '').localeCompare(a.date_updated ?? ''))
     else if (sortBy === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name))
     return sorted
-  }, [allMods, searchQuery, sortBy, categoryFilter])
+  }, [allMods, searchQuery, sortBy, categoryFilter, showDeprecated])
 
   // Reset visible count when filter changes
-  useEffect(() => { setVisibleCount(PAGE_SIZE) }, [searchQuery, sortBy, categoryFilter])
+  useEffect(() => { setVisibleCount(PAGE_SIZE) }, [searchQuery, sortBy, categoryFilter, showDeprecated])
 
   /** Divide uma referência de dependência do Thunderstore ("Owner-Name-Version") em partes. */
   function parseDependencyRef(ref: string): { owner: string; name: string; version: string } | null {
@@ -798,6 +802,14 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                 <option value="updated">Mais recentes</option>
                 <option value="name">Nome A-Z</option>
               </select>
+              <label className="ts-filter-checkbox">
+                <input
+                  type="checkbox"
+                  checked={showDeprecated}
+                  onChange={e => setShowDeprecated(e.target.checked)}
+                />
+                Mostrar depreciados
+              </label>
             </div>
 
             {modsError && (
@@ -853,9 +865,12 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                             {mod.owner} · v{mod.latest.version_number} · ↓ {(mod.total_downloads ?? 0).toLocaleString()}
                           </span>
                           <span className="ts-mod-desc">{mod.latest.description?.slice(0, 100)}</span>
-                          {mod.categories && mod.categories.length > 0 && (
+                          {(mod.is_deprecated || (mod.categories && mod.categories.length > 0)) && (
                             <div className="ts-mod-badges">
-                              {mod.categories.slice(0, 2).map(cat => (
+                              {mod.is_deprecated && (
+                                <span className="badge badge-warning">Depreciado</span>
+                              )}
+                              {mod.categories?.slice(0, 2).map(cat => (
                                 <span key={cat} className="ts-mod-badge">{cat}</span>
                               ))}
                             </div>

@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('glitnir', {
       ipcRenderer.invoke('mods:pickAndRead'),
     importR2Code: (args: { code: string }) =>
       ipcRenderer.invoke('mods:importR2Code', args),
+    openLog: (args: { valheimPath: string }) =>
+      ipcRenderer.invoke('mods:openLog', args),
   },
 
   game: {
@@ -52,6 +54,7 @@ contextBridge.exposeInMainWorld('glitnir', {
 
   fs: {
     pickDir: () => ipcRenderer.invoke('fs:pickDir'),
+    openInExplorer: (args: { dirPath: string }) => ipcRenderer.invoke('fs:openInExplorer', args),
     pickImage: () => ipcRenderer.invoke('fs:pickImage'),
     listDir: (args: { dir: string }) => ipcRenderer.invoke('fs:listDir', args),
     readFile: (args: { filePath: string }) => ipcRenderer.invoke('fs:readFile', args),

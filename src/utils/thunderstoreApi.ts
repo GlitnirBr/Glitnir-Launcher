@@ -89,7 +89,9 @@ export async function fetchAllMods(): Promise<ThunderstoreMod[]> {
       })
   }
 
-  cachedMods = result.filter(m => !m.is_deprecated)
+  // Keep deprecated mods in the cache — ModpackEditorView filters them out by default
+  // and offers a toggle to show them (they're still needed to fulfil old modpacks/dependencies).
+  cachedMods = result
   cacheTime = now
   return cachedMods
 }

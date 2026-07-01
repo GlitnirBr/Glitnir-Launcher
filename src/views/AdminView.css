@@ -314,6 +314,18 @@
   box-shadow: 0 0 0 3px rgba(58,123,213,0.18);
 }
 
+.ts-filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ts-filter-checkbox input { cursor: pointer; }
+
 .ts-result-count {
   font-size: 12px;
   color: var(--text-muted);

@@ -13,6 +13,7 @@ export default function SettingsView({ config, onSave }: Props) {
   const [defaultModsPath, setDefaultModsPath] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [openError, setOpenError] = useState('')
 
   useEffect(() => {
     window.glitnir.mods.defaultPath().then(p => setDefaultModsPath(p))
@@ -31,6 +32,18 @@ export default function SettingsView({ config, onSave }: Props) {
   async function handleSelectModsPath() {
     const p = await window.glitnir.fs.pickDir()
     if (p) setModsPath(p)
+  }
+
+  async function handleOpenFolder(dirPath: string) {
+    setOpenError('')
+    const res = await window.glitnir.fs.openInExplorer({ dirPath })
+    if (!res.success) setOpenError(res.error || 'Erro ao abrir pasta')
+  }
+
+  async function handleOpenLog() {
+    setOpenError('')
+    const res = await window.glitnir.mods.openLog({ valheimPath })
+    if (!res.success) setOpenError(res.error || 'Erro ao abrir log')
   }
 
   async function handleSave() {
@@ -56,6 +69,17 @@ export default function SettingsView({ config, onSave }: Props) {
         <p className="text-secondary">Ajuste as opcoes do launcher.</p>
       </div>
 
+      {openError && (
+        <div className="error-banner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <span>{openError}</span>
+        </div>
+      )}
+
       <div className="settings-section card">
         <div className="card-header">
           <h3>Caminho do Valheim</h3>
@@ -77,6 +101,14 @@ export default function SettingsView({ config, onSave }: Props) {
             </button>
             <button className="btn-ghost" onClick={handleAutoDetect}>
               Auto-detectar
+            </button>
+            <button
+              className="btn-ghost btn-icon"
+              onClick={() => handleOpenFolder(valheimPath)}
+              disabled={!valheimPath}
+              title="Abrir pasta no gerenciador de arquivos"
+            >
+              <FolderIcon />
             </button>
           </div>
         </div>
@@ -107,12 +139,35 @@ export default function SettingsView({ config, onSave }: Props) {
                 Usar padrao
               </button>
             )}
+            <button
+              className="btn-ghost btn-icon"
+              onClick={() => handleOpenFolder(modsPath || defaultModsPath)}
+              disabled={!modsPath && !defaultModsPath}
+              title="Abrir pasta no gerenciador de arquivos"
+            >
+              <FolderIcon />
+            </button>
           </div>
           {defaultModsPath && (
             <p className="setting-hint">
               Padrao: {defaultModsPath}
             </p>
           )}
+        </div>
+      </div>
+
+      <div className="settings-section card">
+        <div className="card-header">
+          <h3>Logs</h3>
+        </div>
+        <div className="card-body">
+          <p className="setting-description">
+            Se estiver tendo erros com mods, abra o log para ver o que aconteceu — ele
+            registra falhas de carregamento e exceções, igual ao log do R2ModManager.
+          </p>
+          <button className="btn-secondary" onClick={handleOpenLog} disabled={!valheimPath}>
+            Abrir log
+          </button>
         </div>
       </div>
 
@@ -127,5 +182,13 @@ export default function SettingsView({ config, onSave }: Props) {
         </button>
       </div>
     </div>
+  )
+}
+
+function FolderIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
   )
 }
