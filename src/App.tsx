@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import Layout from './components/Layout/Layout'
 import AdminLoginModal from './components/Admin/AdminLoginModal'
 import UpdateNotification from './components/UpdateNotification/UpdateNotification'
-import { HomeView, ModsView, SettingsView, AdminView, ModpackEditorView } from './views'
+import InstallBar from './components/InstallBar/InstallBar'
+import { HomeView, ModsView, SettingsView, AdminView, ModpackEditorView, AboutView } from './views'
 import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated, normalizeModpack } from './utils/modManager'
 import { getAdminModpack, getPublicModpack, resolvePrivateMod } from './utils/backendApi'
 import { Config, Modpack, Mod, ModpackEntry } from './types'
@@ -385,6 +386,10 @@ export default function App() {
         isAdmin={isAdmin}
         onAdminClick={handleAdminClick}
         username={isAdmin ? 'Admin' : 'Jogador'}
+        serverOnline={serverOnline}
+        serverPlayers={serverPlayers}
+        serverMaxPlayers={serverMaxPlayers}
+        hasBattlemetrics={!!(publicBattlemetricsId || modpackData?.battlemetricsId)}
       >
         {currentView === 'home' && (
           <HomeView
@@ -406,8 +411,6 @@ export default function App() {
             selectedModpackId={selectedModpack}
             onInstallMods={handleInstallMods}
             installing={installing}
-            installProgress={installProgress}
-            installStatus={installStatus}
           />
         )}
 
@@ -416,6 +419,10 @@ export default function App() {
             config={config}
             onSave={handleSaveConfig}
           />
+        )}
+
+        {currentView === 'about' && (
+          <AboutView modpack={modpackData} />
         )}
 
         {currentView === 'modpack-editor' && isAdmin && config && (
@@ -444,6 +451,13 @@ export default function App() {
       )}
 
       <UpdateNotification />
+      <InstallBar
+        installing={installing}
+        installProgress={installProgress}
+        installStatus={installStatus}
+        onVerify={handleInstallMods}
+        onOpenSettings={() => setCurrentView('settings')}
+      />
     </>
   )
 }

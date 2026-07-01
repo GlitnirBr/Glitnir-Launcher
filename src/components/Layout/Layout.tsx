@@ -16,6 +16,10 @@ interface Props {
   isAdmin: boolean
   onAdminClick: () => void
   username: string
+  serverOnline?: boolean
+  serverPlayers?: number
+  serverMaxPlayers?: number
+  hasBattlemetrics?: boolean
 }
 
 export default function Layout({
@@ -30,7 +34,11 @@ export default function Layout({
   modpackVersion,
   isAdmin,
   onAdminClick,
-  username
+  username,
+  serverOnline,
+  serverPlayers,
+  serverMaxPlayers,
+  hasBattlemetrics,
 }: Props) {
   return (
     <div className="layout">
@@ -50,6 +58,10 @@ export default function Layout({
           isPlaying={isPlaying}
           modpackVersion={modpackVersion}
           isAdmin={isAdmin}
+          serverOnline={serverOnline}
+          serverPlayers={serverPlayers}
+          serverMaxPlayers={serverMaxPlayers}
+          hasBattlemetrics={hasBattlemetrics}
         />
         <main className="layout-main">
           {children}

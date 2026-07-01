@@ -220,6 +220,45 @@
   text-align: center;
 }
 
+/* Server status */
+.sidebar-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.sidebar-status-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.sidebar-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent-red);
+}
+.sidebar-status-row.online .sidebar-status-dot {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px rgba(77, 204, 133, 0.7);
+}
+.sidebar-status-row.online { color: var(--accent-green); }
+.sidebar-status-row.offline { color: var(--accent-red); }
+
+.sidebar-status-players {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* Bottom links */
 .sidebar-links {
   display: flex;

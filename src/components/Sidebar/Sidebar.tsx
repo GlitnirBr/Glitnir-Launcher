@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import logoImg from '../../assets/logo.png'
+import { DISCORD_URL, WEBSITE_URL } from '../../constants/links'
 import './Sidebar.css'
 
 interface Props {
@@ -12,6 +13,10 @@ interface Props {
   isPlaying: boolean
   modpackVersion?: string
   isAdmin: boolean
+  serverOnline?: boolean
+  serverPlayers?: number
+  serverMaxPlayers?: number
+  hasBattlemetrics?: boolean
 }
 
 export default function Sidebar({
@@ -24,6 +29,10 @@ export default function Sidebar({
   isPlaying,
   modpackVersion,
   isAdmin,
+  serverOnline,
+  serverPlayers,
+  serverMaxPlayers,
+  hasBattlemetrics,
 }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const selectedModpackData = modpacks.find(m => m.id === selectedModpack)
@@ -60,6 +69,12 @@ export default function Sidebar({
           onClick={() => onViewChange('settings')}
           icon={<SettingsIcon />}
           label="Configurações"
+        />
+        <NavItem
+          active={currentView === 'about'}
+          onClick={() => onViewChange('about')}
+          icon={<InfoIcon />}
+          label="Sobre o servidor"
         />
         {isAdmin && (
           <NavItem
@@ -127,6 +142,16 @@ export default function Sidebar({
           )}
         </button>
 
+        {hasBattlemetrics && (
+          <div className="sidebar-status">
+            <div className={`sidebar-status-row ${serverOnline ? 'online' : 'offline'}`}>
+              <span className="sidebar-status-dot" />
+              <span>Servidores: {serverOnline ? 'Online' : 'Offline'}</span>
+            </div>
+            <span className="sidebar-status-players">Jogadores online: {serverPlayers ?? 0}/{serverMaxPlayers ?? 0}</span>
+          </div>
+        )}
+
         {modpackVersion && selectedModpack !== 'vanilla' && (
           <span className="version-label">v{modpackVersion}</span>
         )}
@@ -134,11 +159,14 @@ export default function Sidebar({
 
       {/* Bottom links */}
       <div className="sidebar-links">
-        <a className="sidebar-link" onClick={() => window.glitnir.shell.openExternal('https://discord.gg/glitnir')} title="Discord">
+        <a className="sidebar-link" onClick={() => window.glitnir.shell.openExternal(DISCORD_URL)} title="Discord">
           <DiscordIcon />
         </a>
-        <a className="sidebar-link" onClick={() => window.glitnir.shell.openExternal('https://glitnir.gg')} title="Site">
+        <a className="sidebar-link" onClick={() => window.glitnir.shell.openExternal(WEBSITE_URL)} title="Site">
           <WebIcon />
+        </a>
+        <a className="sidebar-link" onClick={() => onViewChange('about')} title="Regras">
+          <RulesIcon />
         </a>
       </div>
     </aside>
@@ -200,6 +228,16 @@ function ModpackIcon() {
   )
 }
 
+function InfoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="11" />
+      <circle cx="12" cy="7.5" r="0.6" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
 function AdminIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -222,6 +260,17 @@ function WebIcon() {
       <circle cx="12" cy="12" r="10" />
       <line x1="2" y1="12" x2="22" y2="12" />
       <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  )
+}
+
+function RulesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" width="18" height="18">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14,2 14,8 20,8" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="17" x2="16" y2="17" />
     </svg>
   )
 }

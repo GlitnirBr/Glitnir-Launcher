@@ -1,0 +1,115 @@
+.install-bar {
+  position: fixed;
+  bottom: 0;
+  left: var(--sidebar-width);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: rgba(10, 20, 35, 0.96);
+  border-top: 1px solid rgba(58, 123, 213, 0.3);
+  backdrop-filter: blur(12px);
+  z-index: 200;
+  animation: installBarSlideUp 0.3s ease;
+}
+
+@keyframes installBarSlideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.install-bar-icon { flex-shrink: 0; }
+.install-bar-icon svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent-blue-hover);
+}
+
+.install-bar-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.install-bar-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.install-bar-progress {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.install-bar-track {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.install-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-blue-dark), var(--accent-blue-hover));
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.install-bar-stats {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.install-bar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+.install-bar-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.install-bar-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--border-medium);
+}
+
+.install-bar-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.install-bar-icon-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--border-medium);
+}

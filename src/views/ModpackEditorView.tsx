@@ -266,34 +266,67 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   // Reset visible count when filter changes
   useEffect(() => { setVisibleCount(PAGE_SIZE) }, [searchQuery, sortBy, categoryFilter])
 
+  /** Divide uma referência de dependência do Thunderstore ("Owner-Name-Version") em partes. */
+  function parseDependencyRef(ref: string): { owner: string; name: string; version: string } | null {
+    const parts = ref.split('-')
+    if (parts.length < 3) return null
+    return { owner: parts[0], name: parts.slice(1, -1).join('-'), version: parts[parts.length - 1] }
+  }
+
   function handleAddThunderstoreMod(ts: ThunderstoreMod) {
-    if (modpackMods.some(m => m.source === 'thunderstore' && m.namespace === ts.owner && m.name === ts.name)) return
-    const version = selectedVersions[ts.full_name] || ts.latest.version_number
-    const downloadUrl = getDownloadUrl(ts.owner, ts.name, version)
-    setModpackMods(prev => [...prev, {
-      name: ts.name,
-      source: 'thunderstore',
-      namespace: ts.owner,
-      version,
-      downloadUrl,
-      description: ts.latest.description?.slice(0, 120),
-    }])
-    // Scan the mod zip for bundled config files in background (Electron only)
+    const alreadyPresent = (owner: string, name: string) =>
+      modpackMods.some(m => m.source === 'thunderstore' && m.namespace === owner && m.name === name)
+
+    if (alreadyPresent(ts.owner, ts.name)) return
+
+    // Coleta o mod escolhido e, recursivamente, suas dependências (nas versões fixadas pelo manifesto).
+    const toAdd: Mod[] = []
+    const seen = new Set<string>()
+
+    function collect(mod: ThunderstoreMod, versionOverride?: string) {
+      const key = `${mod.owner}-${mod.name}`
+      if (seen.has(key) || alreadyPresent(mod.owner, mod.name)) return
+      seen.add(key)
+      const version = versionOverride || selectedVersions[mod.full_name] || mod.latest.version_number
+      const downloadUrl = getDownloadUrl(mod.owner, mod.name, version)
+      toAdd.push({
+        name: mod.name,
+        source: 'thunderstore',
+        namespace: mod.owner,
+        version,
+        downloadUrl,
+        description: mod.latest.description?.slice(0, 120),
+      })
+      for (const depRef of mod.latest.dependencies || []) {
+        const parsed = parseDependencyRef(depRef)
+        if (!parsed) continue
+        const depMod = allMods.find(m => m.owner === parsed.owner && m.name === parsed.name)
+        if (depMod) collect(depMod, parsed.version)
+      }
+    }
+
+    collect(ts)
+    if (toAdd.length === 0) return
+    setModpackMods(prev => [...prev, ...toAdd])
+
+    // Scan each newly added mod's zip for bundled config files in background (Electron only)
     const w = window as any
     if (w?.glitnir?.mods?.readConfigsFromZip) {
-      setScanningMods(prev => new Set(prev).add(ts.name))
-      w.glitnir.mods.readConfigsFromZip({ url: downloadUrl })
-        .then((result: { success: boolean; configs?: { filename: string; installPath: string; content: string }[]; error?: string }) => {
-          if (result.success && result.configs && result.configs.length > 0) {
-            setSuggestedConfigs(prev => {
-              const existing = prev.find(s => s.modName === ts.name)
-              if (existing) return prev
-              return [...prev, { modName: ts.name, configs: result.configs! }]
-            })
-          }
-        })
-        .catch(() => {})
-        .finally(() => setScanningMods(prev => { const s = new Set(prev); s.delete(ts.name); return s }))
+      for (const mod of toAdd) {
+        setScanningMods(prev => new Set(prev).add(mod.name))
+        w.glitnir.mods.readConfigsFromZip({ url: mod.downloadUrl })
+          .then((result: { success: boolean; configs?: { filename: string; installPath: string; content: string }[]; error?: string }) => {
+            if (result.success && result.configs && result.configs.length > 0) {
+              setSuggestedConfigs(prev => {
+                const existing = prev.find(s => s.modName === mod.name)
+                if (existing) return prev
+                return [...prev, { modName: mod.name, configs: result.configs! }]
+              })
+            }
+          })
+          .catch(() => {})
+          .finally(() => setScanningMods(prev => { const s = new Set(prev); s.delete(mod.name); return s }))
+      }
     }
   }
 
