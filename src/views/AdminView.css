@@ -2,9 +2,7 @@
   display: flex;
   flex-direction: column;
   gap: 28px;
-  max-width: 850px;
   width: 100%;
-  margin: 0 auto;
   padding: 28px;
 }
 
@@ -487,11 +485,6 @@
 }
 .btn-link:hover {
   color: var(--accent-blue-hover);
-}
-
-/* Editor layout — wider cap since the Thunderstore browser rows benefit from extra width */
-.modpack-editor {
-  max-width: 1200px;
 }
 
 /* ── Private mod upload ── */

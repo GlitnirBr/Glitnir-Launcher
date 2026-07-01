@@ -579,7 +579,14 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     if (!file) return
     setImageUploading(prev => ({ ...prev, [fieldKey]: true }))
     try {
-      const result = await uploadImage(adminToken, file.filename, file.content, backendUrl || undefined)
+      // Unique filename per upload — the URL is served through GitHub's raw CDN, which caches
+      // aggressively by path. Reusing the same filename (e.g. re-uploading "background.png")
+      // committed new bytes under the same cached URL, so the launcher kept showing the old image.
+      const dotIndex = file.filename.lastIndexOf('.')
+      const ext = dotIndex >= 0 ? file.filename.slice(dotIndex) : ''
+      const base = (dotIndex >= 0 ? file.filename.slice(0, dotIndex) : file.filename).replace(/[^a-zA-Z0-9_-]/g, '_')
+      const uniqueFilename = `${base}-${Date.now()}${ext}`
+      const result = await uploadImage(adminToken, uniqueFilename, file.content, backendUrl || undefined)
       onUrl(result.url)
     } catch (err: any) {
       setNewsError(err.message || 'Falha ao enviar imagem')

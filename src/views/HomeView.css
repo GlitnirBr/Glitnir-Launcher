@@ -7,11 +7,10 @@
 .home-cards-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr minmax(180px, 215px);
-  grid-auto-rows: minmax(210px, 1fr);
+  grid-auto-rows: 210px;
   gap: 12px;
   padding: 12px 20px 16px;
-  flex: 1;
-  min-height: 0;
+  flex-shrink: 0;
 }
 
 /* Server status card */
