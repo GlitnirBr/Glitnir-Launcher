@@ -5,7 +5,7 @@ import UpdateNotification from './components/UpdateNotification/UpdateNotificati
 import InstallBar from './components/InstallBar/InstallBar'
 import { HomeView, ModsView, SettingsView, AdminView, ModpackEditorView, AboutView } from './views'
 import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated, normalizeModpack } from './utils/modManager'
-import { getAdminModpack, getPublicModpack, resolvePrivateMod } from './utils/backendApi'
+import { getAdminModpack, getPublicModpack, getNews, resolvePrivateMod } from './utils/backendApi'
 import { Config, Modpack, Mod, ModpackEntry } from './types'
 import { NewsItem } from './components/News'
 import newsColiseuImg from './assets/news-coliseu.png'
@@ -145,6 +145,15 @@ export default function App() {
   }, [selectedModpack, config, adminToken, isAdmin])
 
   const loadNews = useCallback(async () => {
+    // Try the backend first — this is what the admin's "Notícias" tab actually publishes to
+    // (publishNews → POST {backendUrl}/news). The raw newsUrl below is a legacy fallback for
+    // setups that host a static news.json instead of using the backend.
+    try {
+      const data = await getNews(config?.backendUrl || undefined)
+      setNewsData(data)
+      return
+    } catch { /* ignore, try legacy newsUrl */ }
+
     const newsUrl = config?.newsUrl
     if (!newsUrl) {
       setNewsData({ news: FALLBACK_NEWS })

@@ -683,10 +683,10 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       return
     }
 
-    // ── Formato R2ModManager (ZIP base64 com export.r2x + config/) ──────────
+    // ── Formato R2ModManager (código curto resolvido via API do Thunderstore) ──
     const r2Result = await window.glitnir.mods.importR2Code({ code: raw })
     if (!r2Result.success || !r2Result.mods) {
-      setImportError('Formato não reconhecido. Use um código Glitnir (GLITNIR-v1-…) ou R2ModManager.')
+      setImportError(r2Result.error || 'Formato não reconhecido. Use um código Glitnir (GLITNIR-v1-…) ou R2ModManager.')
       return
     }
 

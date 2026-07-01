@@ -564,39 +564,59 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('mods:importR2Code', async (_e, { code }: { code: string }) => {
+    // A "código R2ModManager" pasted by the user is NOT the profile data itself — it's a
+    // short lookup key. r2modman uploads the exported profile to Thunderstore and the code
+    // just references it; the actual data has to be fetched from Thunderstore's API.
+    // Response body is plain text: "#r2modman" + base64(r2z zip bytes).
+    // Source: https://github.com/ebkr/r2modmanPlus (src/r2mm/mods/ProfileImportExport.ts,
+    // src/r2mm/profiles/ProfilesClient.ts, src/utils/ProfileUtils.ts)
     try {
+      const axios = require('axios')
+      const trimmedCode = code.trim()
+      let profileData: string
+      try {
+        const response = await axios.get(
+          `https://thunderstore.io/api/experimental/legacyprofile/get/${encodeURIComponent(trimmedCode)}/`,
+          { timeout: 15000, responseType: 'text', transformResponse: (data: any) => data },
+        )
+        profileData = response.data
+      } catch (err: any) {
+        if (err.response?.status === 404) {
+          return { success: false, error: 'Código não encontrado ou expirado. Códigos do R2ModManager valem só algumas horas — peça um novo.' }
+        }
+        return { success: false, error: `Falha ao buscar o código no Thunderstore: ${err.message}` }
+      }
+
+      const PREFIX = '#r2modman'
+      if (typeof profileData !== 'string' || !profileData.startsWith(PREFIX)) {
+        return { success: false, error: 'Código inválido — a resposta do Thunderstore não tem o formato esperado.' }
+      }
+      const zipBuffer = Buffer.from(profileData.slice(PREFIX.length).trim(), 'base64')
+
       const AdmZip = require('adm-zip')
-      const zipBuffer = Buffer.from(code.trim(), 'base64')
       const zip = new AdmZip(zipBuffer)
       const entry = zip.getEntry('export.r2x')
-      if (!entry) return { success: false, error: 'Arquivo export.r2x não encontrado no código' }
-      const content = zip.readAsText(entry)
+      if (!entry) return { success: false, error: 'Arquivo export.r2x não encontrado no perfil baixado' }
 
-      // Parse the r2x YAML format: each mod entry has ModReference and Enabled
-      const result: { namespace: string; name: string; version: string }[] = []
-      let current: { ref?: string; enabled?: boolean } = {}
+      const yaml = require('yaml')
+      const parsed = yaml.parse(zip.readAsText(entry))
+      if (typeof parsed?.profileName !== 'string' || !Array.isArray(parsed?.mods)) {
+        return { success: false, error: 'export.r2x do perfil está com formato inválido' }
+      }
 
-      function flushCurrent() {
-        if (!current.ref || current.enabled === false) return
-        const parts = current.ref.split('-')
-        if (parts.length >= 3) {
-          result.push({
+      // Real field names (confirmed against r2modmanPlus source): mods[].name is
+      // "Namespace-ModName", version is {major,minor,patch}, enabled defaults to true.
+      const result = parsed.mods
+        .filter((m: any) => m?.enabled === undefined || m.enabled)
+        .map((m: any) => {
+          const parts = String(m.name).split('-')
+          return {
             namespace: parts[0],
-            name: parts.slice(1, -1).join('-'),
-            version: parts[parts.length - 1],
-          })
-        }
-      }
-
-      for (const line of content.split('\n')) {
-        const trimmed = line.trim()
-        if (trimmed === '-') { flushCurrent(); current = {} }
-        const refM = trimmed.match(/^ModReference:\s*(.+)$/)
-        const enaM = trimmed.match(/^Enabled:\s*(.+)$/)
-        if (refM) current.ref = refM[1].trim()
-        if (enaM) current.enabled = enaM[1].trim().toLowerCase() !== 'false'
-      }
-      flushCurrent()
+            name: parts.slice(1).join('-'),
+            version: `${m.version?.major ?? 0}.${m.version?.minor ?? 0}.${m.version?.patch ?? 0}`,
+          }
+        })
+        .filter((m: { namespace: string; name: string }) => m.namespace && m.name)
 
       // Extract config files from config/ folder in the ZIP
       const configs: { filename: string; installPath: string; content: string }[] = []
