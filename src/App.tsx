@@ -245,6 +245,17 @@ export default function App() {
         ? mods.filter(m => !m.installed || m.outdated)
         : mods
 
+      // Remove mods that were installed for this profile before but are no longer
+      // part of the modpack (e.g. admin removed them) — otherwise the old plugin
+      // folder stays on disk forever and keeps loading in-game.
+      const previouslyInstalled = config.installedByProfile?.[profile] || []
+      const currentModNames = new Set(modpackData.mods.map(m => m.name))
+      const stale = previouslyInstalled.filter(m => !currentModNames.has(m.name))
+      for (const mod of stale) {
+        setInstallStatus(`Removendo ${mod.name}...`)
+        await window.glitnir.mods.remove({ modName: mod.name, profile })
+      }
+
       for (let i = 0; i < toInstall.length; i++) {
         const mod = toInstall[i]
         setInstallStatus(`Baixando ${mod.name}...`)
