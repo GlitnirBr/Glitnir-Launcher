@@ -72,7 +72,7 @@ export default function HomeView({
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [uploading, setUploading] = useState<Record<string, boolean>>({})
+  const [uploadPhase, setUploadPhase] = useState<Record<string, 'uploading' | 'verifying' | undefined>>({})
 
   const [draftTitle, setDraftTitle] = useState('')
   const [draftSubtitle, setDraftSubtitle] = useState('')
@@ -111,7 +111,7 @@ export default function HomeView({
     if (!adminToken) return
     const file = await window.glitnir.fs.pickImage()
     if (!file) return
-    setUploading(prev => ({ ...prev, [key]: true }))
+    setUploadPhase(prev => ({ ...prev, [key]: 'uploading' }))
     try {
       // Unique filename per upload — see ModpackEditorView.handlePickImage for why:
       // GitHub's raw CDN caches by path, so reusing a filename would keep serving stale bytes.
@@ -120,11 +120,25 @@ export default function HomeView({
       const base = (dotIndex >= 0 ? file.filename.slice(0, dotIndex) : file.filename).replace(/[^a-zA-Z0-9_-]/g, '_')
       const uniqueFilename = `${base}-${Date.now()}${ext}`
       const result = await uploadImage(adminToken, uniqueFilename, file.content, backendUrl)
+
+      // A GitHub raw.githubusercontent.com file can take a little while to actually become
+      // fetchable right after being committed, even though the upload itself succeeded — so a
+      // fresh URL can render as blank for the first several seconds. Poll until it's reachable
+      // (or give up and warn) instead of silently showing nothing.
+      setUploadPhase(prev => ({ ...prev, [key]: 'verifying' }))
+      const ready = await waitForImageReady(result.url)
+      if (!ready) {
+        setError(
+          `A imagem foi enviada, mas ainda não carregou depois de várias tentativas — pode ser só o GitHub ` +
+          `propagando o arquivo novo (tente reabrir a edição em um minuto) ou a URL pode estar quebrada. ` +
+          `URL retornada: ${result.url}`
+        )
+      }
       onUrl(result.url)
     } catch (err: any) {
       setError(err.message || 'Falha ao enviar imagem')
     } finally {
-      setUploading(prev => ({ ...prev, [key]: false }))
+      setUploadPhase(prev => ({ ...prev, [key]: undefined }))
     }
   }
 
@@ -213,8 +227,8 @@ export default function HomeView({
                 <input type="text" value={draftImage} onChange={e => setDraftImage(e.target.value)}
                   placeholder="URL gerada após envio..." style={{ flex: 1 }} readOnly={!!draftImage} />
                 <button className="btn-ghost" style={{ whiteSpace: 'nowrap', fontSize: 13 }}
-                  onClick={() => handlePickImage('hero', setDraftImage)} disabled={uploading['hero']}>
-                  {uploading['hero'] ? 'Enviando...' : draftImage ? '↺ Trocar imagem' : '↑ Selecionar e enviar'}
+                  onClick={() => handlePickImage('hero', setDraftImage)} disabled={!!uploadPhase['hero']}>
+                  {uploadButtonLabel(uploadPhase['hero']) || (draftImage ? '↺ Trocar imagem' : '↑ Selecionar e enviar')}
                 </button>
                 {draftImage && <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => setDraftImage('')}>✕</button>}
               </div>
@@ -335,8 +349,8 @@ export default function HomeView({
                       placeholder="URL gerada após envio..." style={{ flex: 1 }} readOnly={!!draftCards[key].image} />
                     <button className="btn-ghost" style={{ whiteSpace: 'nowrap', fontSize: 13 }}
                       onClick={() => handlePickImage(key, url => setDraftCards(prev => ({ ...prev, [key]: { ...prev[key], image: url } })))}
-                      disabled={uploading[key]}>
-                      {uploading[key] ? 'Enviando...' : draftCards[key].image ? '↺ Trocar' : '↑ Selecionar e enviar'}
+                      disabled={!!uploadPhase[key]}>
+                      {uploadButtonLabel(uploadPhase[key]) || (draftCards[key].image ? '↺ Trocar' : '↑ Selecionar e enviar')}
                     </button>
                     {draftCards[key].image && (
                       <button className="btn-ghost" style={{ fontSize: 12 }}
@@ -364,6 +378,34 @@ export default function HomeView({
       )}
     </div>
   )
+}
+
+function uploadButtonLabel(phase: 'uploading' | 'verifying' | undefined): string | null {
+  if (phase === 'uploading') return 'Enviando...'
+  if (phase === 'verifying') return 'Verificando...'
+  return null
+}
+
+/** Polls a freshly-uploaded URL until it's actually fetchable, since raw.githubusercontent.com
+ * can lag a few seconds (sometimes longer) behind the commit for brand-new files. */
+function waitForImageReady(url: string, maxAttempts = 6): Promise<boolean> {
+  return new Promise(resolve => {
+    let attempt = 0
+    function tryLoad() {
+      attempt++
+      const img = new Image()
+      img.onload = () => resolve(true)
+      img.onerror = () => {
+        if (attempt >= maxAttempts) {
+          resolve(false)
+          return
+        }
+        setTimeout(tryLoad, attempt * 1000)
+      }
+      img.src = `${url}${url.includes('?') ? '&' : '?'}cb=${Date.now()}`
+    }
+    tryLoad()
+  })
 }
 
 function EditIcon() {
