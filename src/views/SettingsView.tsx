@@ -42,7 +42,7 @@ export default function SettingsView({ config, onSave }: Props) {
 
   async function handleOpenLog() {
     setOpenError('')
-    const res = await window.glitnir.mods.openLog({ valheimPath })
+    const res = await window.glitnir.mods.openLog({ valheimPath, profile: config.selectedModpack })
     if (!res.success) setOpenError(res.error || 'Erro ao abrir log')
   }
 

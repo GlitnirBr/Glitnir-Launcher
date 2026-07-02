@@ -24,8 +24,8 @@ const FALLBACK_NEWS: NewsItem[] = [
 ]
 
 const VANILLA: ModpackEntry = { id: 'vanilla', name: 'Vanilla', type: 'vanilla', builtin: true }
-const MAIN: ModpackEntry = { id: 'principal', name: 'Glitnir', type: 'public' }
-const ADMIN_TEST: ModpackEntry = { id: 'admin-teste', name: 'Glitnir Admin', type: 'admin' }
+const MAIN: ModpackEntry = { id: 'glitnir', name: 'Glitnir', type: 'public' }
+const ADMIN_TEST: ModpackEntry = { id: 'glitnir-admin', name: 'Glitnir Admin', type: 'admin' }
 
 export default function App() {
   const [config, setConfig] = useState<Config | null>(null)
@@ -36,7 +36,7 @@ export default function App() {
   const [showAdminModal, setShowAdminModal] = useState(false)
 
   const [currentView, setCurrentView] = useState('home')
-  const [selectedModpack, setSelectedModpack] = useState('principal')
+  const [selectedModpack, setSelectedModpack] = useState(MAIN.id)
 
   const [modpackData, setModpackData] = useState<Modpack | null>(null)
   const [mods, setMods] = useState<(Mod & { installed?: boolean; outdated?: boolean })[]>([])
@@ -61,6 +61,9 @@ export default function App() {
   const loadConfig = useCallback(async () => {
     try {
       const cfg = await window.glitnir.config.load()
+      // Migra ids antigos de perfil para os novos nomes de pasta (principal → glitnir).
+      const LEGACY_IDS: Record<string, string> = { principal: MAIN.id, 'admin-teste': ADMIN_TEST.id }
+      const selected = cfg.selectedModpack ? (LEGACY_IDS[cfg.selectedModpack] || cfg.selectedModpack) : undefined
       setConfig({
         valheimPath: cfg.valheimPath || '',
         installedMods: cfg.installedMods || [],
@@ -69,10 +72,10 @@ export default function App() {
         modpackRepo: cfg.modpackRepo || '',
         modpackBranch: cfg.modpackBranch || 'main',
         newsUrl: cfg.newsUrl || '',
-        selectedModpack: cfg.selectedModpack,
+        selectedModpack: selected,
         modsPath: cfg.modsPath,
       })
-      if (cfg.selectedModpack) setSelectedModpack(cfg.selectedModpack)
+      if (selected) setSelectedModpack(selected)
     } catch {
       setConfig({
         valheimPath: '',
@@ -377,7 +380,7 @@ export default function App() {
     if (isAdmin) {
       setIsAdmin(false)
       setAdminToken(null)
-      if (selectedModpack === ADMIN_TEST.id) setSelectedModpack('principal')
+      if (selectedModpack === ADMIN_TEST.id) setSelectedModpack(MAIN.id)
       setCurrentView('home')
     } else {
       setShowAdminModal(true)

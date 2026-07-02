@@ -39,7 +39,7 @@ contextBridge.exposeInMainWorld('glitnir', {
       ipcRenderer.invoke('mods:pickAndRead'),
     importR2Code: (args: { code: string }) =>
       ipcRenderer.invoke('mods:importR2Code', args),
-    openLog: (args: { valheimPath: string }) =>
+    openLog: (args: { valheimPath: string; profile?: string }) =>
       ipcRenderer.invoke('mods:openLog', args),
   },
 

@@ -38,6 +38,58 @@ function copyDirRecursive(src: string, dest: string) {
   }
 }
 
+/** Localiza o BepInEx Preloader dentro de <perfil>/BepInEx/core (nome varia por runtime). */
+function findPreloaderDll(coreDir: string): string | null {
+  if (!fs.existsSync(coreDir)) return null
+  const known = [
+    'BepInEx.Preloader.dll',            // Valheim / Unity Mono (5.4.x)
+    'BepInEx.Unity.Mono.Preloader.dll',
+    'BepInEx.IL2CPP.dll',
+    'BepInEx.Unity.IL2CPP.dll',
+    'BepInEx.NET.CoreCLR.dll',
+  ]
+  const files = fs.readdirSync(coreDir)
+  const hit = known.find(k => files.includes(k))
+  return hit ? path.join(coreDir, hit) : null
+}
+
+/** Copia um arquivo só se estiver ausente ou diferente no destino (tamanho ou mtime). */
+function copyFileIfChanged(src: string, dest: string) {
+  try {
+    const s = fs.statSync(src)
+    if (fs.existsSync(dest)) {
+      const d = fs.statSync(dest)
+      // copyFileSync não preserva mtime, então o destino fica >= origem quando já está atualizado.
+      if (d.size === s.size && d.mtimeMs >= s.mtimeMs) return
+    }
+  } catch { /* em dúvida, copia */ }
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  fs.copyFileSync(src, dest)
+}
+
+/**
+ * Sincroniza src → dest copiando apenas o que mudou (rápido em launches repetidos).
+ * Com `mirror`, remove do destino o que não existe mais na origem (limpa mods removidos
+ * e versões duplicadas). Sem `mirror`, nunca apaga (preserva configs gerados em runtime).
+ */
+function syncDir(src: string, dest: string, mirror: boolean) {
+  if (!fs.existsSync(src)) return
+  fs.mkdirSync(dest, { recursive: true })
+  const srcEntries = fs.readdirSync(src)
+  if (mirror && fs.existsSync(dest)) {
+    const keep = new Set(srcEntries)
+    for (const name of fs.readdirSync(dest)) {
+      if (!keep.has(name)) fs.rmSync(path.join(dest, name), { recursive: true, force: true })
+    }
+  }
+  for (const name of srcEntries) {
+    const s = path.join(src, name)
+    const d = path.join(dest, name)
+    if (fs.statSync(s).isDirectory()) syncDir(s, d, mirror)
+    else copyFileIfChanged(s, d)
+  }
+}
+
 /**
  * Subpastas de topo de um pacote Thunderstore que o BepInEx espera em locais
  * próprios (fora de plugins/). Espelha as install rules do r2modman.
@@ -451,12 +503,16 @@ app.whenReady().then(() => {
         if (entry.isDirectory) continue
         const name = entry.entryName.replace(/\\/g, '/')
         if (!name.endsWith('.cfg')) continue
-        const filename = path.basename(name)
-        // Normalize to BepInEx/config/<filename> regardless of where in the zip it lives
-        const installPath = `BepInEx/config/${filename}`
+        // Preserva a estrutura relativa a uma pasta config/ (ex.: config/Sub/x.cfg →
+        // BepInEx/config/Sub/x.cfg). Assim o config casa com onde o mod realmente instala,
+        // sem gerar cópia duplicada num caminho achatado. Fora de config/, vai pra raiz.
+        const idx = name.indexOf('config/')
+        const rel = idx >= 0 ? name.slice(idx + 'config/'.length) : path.posix.basename(name)
+        if (!rel || rel.includes('..')) continue
+        const installPath = `BepInEx/config/${rel}`
         try {
           const content = entry.getData().toString('utf-8')
-          found.push({ filename, installPath, content })
+          found.push({ filename: path.posix.basename(rel), installPath, content })
         } catch {
           // Skip unreadable entries
         }
@@ -472,15 +528,19 @@ app.whenReady().then(() => {
     return fs.existsSync(dll)
   })
 
-  ipcMain.handle('mods:openLog', async (_e, { valheimPath }: { valheimPath: string }) => {
+  ipcMain.handle('mods:openLog', async (_e, { valheimPath, profile }: { valheimPath: string; profile?: string }) => {
     try {
-      if (!valheimPath) return { success: false, error: 'Caminho do Valheim não configurado.' }
-      // Prefer BepInEx's own log (plugin load errors, exceptions) — fall back to the raw
-      // Unity output log (redirect_output_log in doorstop_config.ini) for earlier crashes.
-      const bepinexLog = path.join(valheimPath, 'BepInEx', 'LogOutput.log')
-      const outputLog = path.join(valheimPath, 'output_log.txt')
-      const logPath = fs.existsSync(bepinexLog) ? bepinexLog : outputLog
-      if (!fs.existsSync(logPath)) {
+      // No modelo r2modman o BepInEx roda a partir do perfil, então o LogOutput.log fica lá.
+      // Ordem: log do BepInEx no perfil → log do BepInEx no jogo (instalações antigas por cópia)
+      // → output_log.txt bruto do Unity (redirect_output_log) para crashes precoces.
+      const candidates: string[] = []
+      if (profile) candidates.push(path.join(profileDir(profile), 'BepInEx', 'LogOutput.log'))
+      if (valheimPath) {
+        candidates.push(path.join(valheimPath, 'BepInEx', 'LogOutput.log'))
+        candidates.push(path.join(valheimPath, 'output_log.txt'))
+      }
+      const logPath = candidates.find(p => fs.existsSync(p))
+      if (!logPath) {
         return { success: false, error: 'Nenhum log encontrado ainda. Jogue no modo modado pelo menos uma vez.' }
       }
       const err = await shell.openPath(logPath)
@@ -519,95 +579,75 @@ app.whenReady().then(() => {
       } else {
         const profileRoot = profileDir(profile)
 
-        // Corrige config/ aninhado em plugins/ neste perfil antes de copiar.
+        // Corrige config/ aninhado em plugins/ neste perfil.
         migrateNestedBepInExFolders(profileRoot)
 
-        // Validate BepInExPack is installed in the profile
-        const bepinexCoreSrc = path.join(profileRoot, 'BepInEx', 'core')
-        const bepinexDllSrc = path.join(bepinexCoreSrc, 'BepInEx.dll')
-        if (!fs.existsSync(bepinexDllSrc)) {
-          return { success: false, error: `BepInEx.dll não encontrado em ${bepinexDllSrc} — Certifique-se de que o BepInExPack está no modpack e reinstale os mods.` }
+        // ── Modelo r2modman ─────────────────────────────────────────────────────────────
+        // NÃO copiamos o BepInEx para a pasta do jogo. Deixamos só o proxy do doorstop
+        // (winhttp.dll) na pasta do Steam e apontamos o target para o BepInEx.Preloader.dll
+        // DENTRO do perfil. O BepInEx deriva plugins/config/patchers do local do Preloader
+        // (confirmado no Entrypoint.cs do BepInEx: BepInExRootPath = 2 níveis acima do
+        // Preloader), então tudo carrega direto do perfil — sem cópia pesada a cada launch e
+        // sem lixo/configs duplicadas acumulando na pasta do jogo.
+        const coreDir = path.join(profileRoot, 'BepInEx', 'core')
+        const preloaderSrc = findPreloaderDll(coreDir)
+        if (!preloaderSrc) {
+          return { success: false, error: `BepInEx.Preloader.dll não encontrado em ${coreDir} — Certifique-se de que o BepInExPack está no modpack e reinstale os mods.` }
         }
 
-        // Copy profile → game dir (same as manual BepInEx install).
         function tryCopy(src: string, dest: string) {
           if (!fs.existsSync(src)) return
           try { fs.copyFileSync(src, dest) } catch (e: any) {
             if (e.code !== 'EBUSY') throw e
           }
         }
-        function tryCopyDir(src: string, dest: string) {
-          if (!fs.existsSync(src)) return
-          try { copyDirRecursive(src, dest) } catch (e: any) {
-            if (e.code !== 'EBUSY') throw e
-          }
-        }
 
-        // Prefer doorstop_libs/x64/winhttp.dll (guaranteed 64-bit proxy for Valheim).
-        // Fall back to profile root winhttp.dll if x64 version not present.
+        // Proxy do doorstop na pasta do jogo (leve: só winhttp.dll + doorstop_libs).
+        // Prefere doorstop_libs/x64/winhttp.dll (proxy 64-bit garantido para o Valheim).
         const winhttpX64 = path.join(profileRoot, 'doorstop_libs', 'x64', 'winhttp.dll')
         const winhttpRoot = path.join(profileRoot, 'winhttp.dll')
         const winhttpSrc = fs.existsSync(winhttpX64) ? winhttpX64 : winhttpRoot
         tryCopy(winhttpSrc, path.join(valheimPath, 'winhttp.dll'))
-        tryCopyDir(path.join(profileRoot, 'doorstop_libs'), path.join(valheimPath, 'doorstop_libs'))
-
-        // Remove código de plugins/patchers de um launch anterior ANTES de copiar.
-        // copyDirRecursive só faz merge, nunca apaga — sem isto, mods removidos e versões
-        // antigas duplicadas ficariam presos na pasta do jogo, continuando a carregar/dar erro
-        // (ex.: "Skipping [Mod x.y] because a newer version exists"). Não mexe em config/
-        // para preservar configs gerados/editados em runtime.
-        for (const sub of ['plugins', 'patchers']) {
-          try { fs.rmSync(path.join(valheimPath, 'BepInEx', sub), { recursive: true, force: true }) }
-          catch { /* em uso? ignora — o merge sobrescreve por cima */ }
-        }
-
-        tryCopyDir(path.join(profileRoot, 'BepInEx'), path.join(valheimPath, 'BepInEx'))
+        try { syncDir(path.join(profileRoot, 'doorstop_libs'), path.join(valheimPath, 'doorstop_libs'), false) }
+        catch (e: any) { if (e.code !== 'EBUSY') throw e }
 
         if (!fs.existsSync(path.join(valheimPath, 'winhttp.dll'))) {
           return { success: false, error: 'winhttp.dll não encontrado. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.' }
         }
 
-        const bepinexDllDest = path.join(valheimPath, 'BepInEx', 'core', 'BepInEx.dll')
-        if (!fs.existsSync(bepinexDllDest)) {
-          return { success: false, error: `BepInEx.dll não chegou à pasta do Valheim: ${bepinexDllDest}` }
+        // Limpeza única: versões antigas COPIAVAM o BepInEx para a pasta do jogo. Agora ele
+        // carrega do perfil, então esse BepInEx na pasta do Steam é lixo ignorado — e era a
+        // fonte das configs duplicadas (traduções em dois caminhos). Remove uma vez; best-effort
+        // (ignora se o jogo estiver aberto/arquivo em uso).
+        const gameBepinex = path.join(valheimPath, 'BepInEx')
+        if (fs.existsSync(gameBepinex)) {
+          try { fs.rmSync(gameBepinex, { recursive: true, force: true }) } catch { /* em uso? ignora */ }
         }
 
-        // Write doorstop_config.ini compatible with BOTH doorstop v3 and v4.
-        // The game dir may have either proxy version; writing both sections ensures it works regardless.
-        // v3: reads [UnityDoorstop] → targetAssembly → BepInEx.dll
-        // v4: reads [General]       → target_assembly → BepInEx.Preloader.dll
-        const preloaderDll = 'BepInEx\\core\\BepInEx.Preloader.dll'
-        const coreDll = 'BepInEx\\core\\BepInEx.dll'
+        // doorstop_config.ini apontando para o Preloader do PERFIL (caminho absoluto),
+        // compatível com doorstop v3 e v4. redirect_output_log grava output_log.txt na pasta do
+        // jogo (captura crashes antes do logger do BepInEx subir).
         const iniPath = path.join(valheimPath, 'doorstop_config.ini')
         if (fs.existsSync(iniPath)) fs.unlinkSync(iniPath)
-        // redirect_output_log = true: mirrors r2modman's default — writes the raw game/
-        // Unity output to output_log.txt in valheimPath, which captures crashes and errors
-        // that happen before BepInEx's own logger is up. Needed to debug mod issues.
         const doorstopIni = [
           '[General]',
           'enabled = true',
-          `target_assembly = ${preloaderDll}`,
+          `target_assembly = ${preloaderSrc}`,
           'redirect_output_log = true',
           'boot_config_override =',
           'ignore_disable_switch = false',
           '',
           '[UnityDoorstop]',
           'enabled=true',
-          `targetAssembly=${coreDll}`,
+          `targetAssembly=${preloaderSrc}`,
           'redirect_output_log=true',
           'ignore_disable_switch=false',
           '',
         ].join('\r\n')
         fs.writeFileSync(iniPath, doorstopIni, { encoding: 'utf8' })
 
-        // Verify BepInEx.Preloader.dll (needed by doorstop v4) is in the game dir
-        const preloaderDest = path.join(valheimPath, 'BepInEx', 'core', 'BepInEx.Preloader.dll')
-        const hasPreloader = fs.existsSync(preloaderDest)
-
-        const winhttpSize = fs.statSync(path.join(valheimPath, 'winhttp.dll')).size
-        console.log('[launch] winhttp.dll size:', winhttpSize, 'bytes')
-        console.log('[launch] BepInEx.dll exists:', fs.existsSync(bepinexDllDest))
-        console.log('[launch] BepInEx.Preloader.dll exists:', hasPreloader)
+        console.log('[launch] winhttp.dll size:', fs.statSync(path.join(valheimPath, 'winhttp.dll')).size, 'bytes')
+        console.log('[launch] preloader (perfil):', preloaderSrc)
         console.log('[launch] ini written:', doorstopIni.replace(/\r\n/g, '↵'))
 
         // Use shell.openPath (ShellExecuteEx) — identical to double-clicking from Explorer.
@@ -744,18 +784,24 @@ app.whenReady().then(() => {
         })
         .filter((m: { namespace: string; name: string }) => m.namespace && m.name)
 
-      // Extract config files from config/ folder in the ZIP
+      // Extract config files from the config/ folder in the ZIP, PRESERVING the subfolder
+      // structure (ex.: config/DistantOrigins/Translations/Mod/Mod.French.yml). Achatar tudo
+      // para BepInEx/config/<nome> criava uma segunda cópia num caminho diferente do que o
+      // próprio mod instala (config/DistantOrigins/...), gerando "Duplicate key ... skipped".
+      // Mantendo o caminho, o config do perfil sobrescreve o padrão do mod — igual ao r2modman.
       const configs: { filename: string; installPath: string; content: string }[] = []
       zip.getEntries().forEach((e: any) => {
-        if (!e.isDirectory && e.entryName.startsWith('config/')) {
-          const filename = path.basename(e.entryName)
-          if (!filename) return
-          configs.push({
-            filename,
-            installPath: `BepInEx/config/${filename}`,
-            content: zip.readAsText(e),
-          })
-        }
+        if (e.isDirectory) return
+        const name = String(e.entryName).replace(/\\/g, '/')
+        if (!name.startsWith('config/')) return
+        const rel = name.slice('config/'.length)
+        // Ignora entradas vazias e qualquer tentativa de path traversal.
+        if (!rel || rel.includes('..')) return
+        configs.push({
+          filename: path.posix.basename(rel),
+          installPath: `BepInEx/config/${rel}`,
+          content: zip.readAsText(e),
+        })
       })
 
       return { success: true, mods: result, configs }
