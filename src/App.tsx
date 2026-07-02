@@ -345,10 +345,16 @@ export default function App() {
     setLaunchError('')
 
     try {
-      // Auto-install mods if any are missing or outdated before launching.
-      const hasPending = selectedModpack !== 'vanilla' && mods.some(m => !m.optionalDisabled && (!m.installed || m.outdated))
-      if (hasPending) {
-        await handleInstallMods()
+      // Auto-install mods before launching. Besides the cached "pending" state, we check the
+      // actual disk: if the profile folder was deleted (or BepInEx core is missing), the cached
+      // "installed" flags lie — force a full reinstall so we recreate the profile from scratch
+      // instead of launching into a missing BepInEx.dll.
+      if (selectedModpack !== 'vanilla') {
+        const bepinexOk = await window.glitnir.mods.bepinexOk({ profile: selectedModpack })
+        const hasPending = mods.some(m => !m.optionalDisabled && (!m.installed || m.outdated))
+        if (!bepinexOk || hasPending) {
+          await handleInstallMods()
+        }
       }
 
       const mode = selectedModpack === 'vanilla' ? 'vanilla' : 'modded'
