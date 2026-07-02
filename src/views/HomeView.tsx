@@ -73,6 +73,9 @@ export default function HomeView({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [uploadPhase, setUploadPhase] = useState<Record<string, 'uploading' | 'verifying' | undefined>>({})
+  // Prévia local (data URL) enquanto o upload/propagação do GitHub acontece, para o admin
+  // ver a imagem escolhida na hora em vez de esperar a URL remota ficar acessível.
+  const [localPreview, setLocalPreview] = useState<Record<string, string | undefined>>({})
 
   const [draftTitle, setDraftTitle] = useState('')
   const [draftSubtitle, setDraftSubtitle] = useState('')
@@ -111,6 +114,9 @@ export default function HomeView({
     if (!adminToken) return
     const file = await window.glitnir.fs.pickImage()
     if (!file) return
+    // Mostra a imagem escolhida imediatamente (data URL a partir dos bytes locais),
+    // antes de esperar o upload e a propagação da URL remota.
+    setLocalPreview(prev => ({ ...prev, [key]: `data:${mimeFromName(file.filename)};base64,${file.content}` }))
     setUploadPhase(prev => ({ ...prev, [key]: 'uploading' }))
     try {
       // Unique filename per upload — see ModpackEditorView.handlePickImage for why:
@@ -139,6 +145,8 @@ export default function HomeView({
       setError(err.message || 'Falha ao enviar imagem')
     } finally {
       setUploadPhase(prev => ({ ...prev, [key]: undefined }))
+      // Ao final, a URL remota (verificada) já assume; descarta a prévia local.
+      setLocalPreview(prev => ({ ...prev, [key]: undefined }))
     }
   }
 
@@ -170,14 +178,16 @@ export default function HomeView({
 
   // While editing, feed the draft values into the real display components so the admin
   // sees exactly what players will see, live, before publishing anything.
-  const displayFeatured = editing ? { title: draftTitle, subtitle: draftSubtitle, image: draftImage, link: draftLink } : featured
+  const displayFeatured = editing
+    ? { title: draftTitle, subtitle: draftSubtitle, image: localPreview['hero'] || draftImage, link: draftLink }
+    : featured
   const displayAlert = editing ? (draftAlertText.trim() ? { text: draftAlertText, link: draftAlertLink } : undefined) : pinnedAlert
   function displayCard(key: CardKey, fallback: NewsItem | null): NewsItem | null {
     if (!editing) return fallback
     const d = draftCards[key]
     if (!d.title.trim()) return null
     const meta = CARD_META.find(c => c.key === key)!
-    return { id: key, type: meta.type, category: key, ...d }
+    return { id: key, type: meta.type, category: key, ...d, image: localPreview[key] || d.image }
   }
 
   return (
@@ -378,6 +388,16 @@ export default function HomeView({
       )}
     </div>
   )
+}
+
+/** Deriva o MIME type a partir da extensão do arquivo (para montar a data URL da prévia). */
+function mimeFromName(filename: string): string {
+  const ext = filename.slice(filename.lastIndexOf('.') + 1).toLowerCase()
+  const map: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    webp: 'image/webp', gif: 'image/gif',
+  }
+  return map[ext] || 'image/png'
 }
 
 function uploadButtonLabel(phase: 'uploading' | 'verifying' | undefined): string | null {

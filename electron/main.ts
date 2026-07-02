@@ -38,6 +38,110 @@ function copyDirRecursive(src: string, dest: string) {
   }
 }
 
+/**
+ * Subpastas de topo de um pacote Thunderstore que o BepInEx espera em locais
+ * próprios (fora de plugins/). Espelha as install rules do r2modman.
+ */
+const BEPINEX_ROUTES: Record<string, string> = {
+  config: 'config',
+  patchers: 'patchers',
+  monomod: 'monomod',
+  core: 'core',
+  plugins: 'plugins',
+}
+
+/**
+ * Roteia o conteúdo de um pacote Thunderstore já extraído (staging) para os
+ * locais corretos do BepInEx, imitando as install rules do r2modman:
+ *   config/   → BepInEx/config/   (preservando subpastas — é isso que gera as
+ *               pastas separadas de config que alguns mods criam)
+ *   patchers/ → BepInEx/patchers/
+ *   monomod/  → BepInEx/monomod/
+ *   core/     → BepInEx/core/
+ *   plugins/  → BepInEx/plugins/<modName>/
+ *   restante (dll solta, manifest, readme, icon, assets…) → BepInEx/plugins/<modName>/
+ */
+function routeModContents(staging: string, profileRoot: string, modName: string) {
+  // Desce por pastas-invólucro (uma única subpasta, sem arquivos soltos) até a raiz do pacote.
+  let root = staging
+  for (;;) {
+    const entries = fs.readdirSync(root)
+    const subdirs = entries.filter(e => fs.statSync(path.join(root, e)).isDirectory())
+    const files = entries.filter(e => fs.statSync(path.join(root, e)).isFile())
+    if (files.length === 0 && subdirs.length === 1) {
+      root = path.join(root, subdirs[0])
+    } else {
+      break
+    }
+  }
+
+  const pluginTarget = path.join(profileRoot, 'BepInEx', 'plugins', modName)
+
+  for (const entry of fs.readdirSync(root)) {
+    const full = path.join(root, entry)
+    const isDir = fs.statSync(full).isDirectory()
+    const routed = isDir ? BEPINEX_ROUTES[entry.toLowerCase()] : undefined
+
+    if (routed && routed !== 'plugins') {
+      // config / patchers / monomod / core → BepInEx/<routed>/ (mantém subestrutura)
+      copyDirRecursive(full, path.join(profileRoot, 'BepInEx', routed))
+    } else if (routed === 'plugins') {
+      // conteúdo de plugins/ do pacote entra na pasta do próprio mod
+      copyDirRecursive(full, pluginTarget)
+    } else if (isDir) {
+      // pasta desconhecida (assets etc.) → plugins/<modName>/ preservando estrutura
+      copyDirRecursive(full, path.join(pluginTarget, entry))
+    } else {
+      // arquivo solto (dll, manifest, readme, icon…) → plugins/<modName>/
+      fs.mkdirSync(pluginTarget, { recursive: true })
+      fs.copyFileSync(full, path.join(pluginTarget, entry))
+    }
+  }
+}
+
+/**
+ * Migra instalações antigas: versões anteriores do launcher extraíam o pacote
+ * Thunderstore inteiro dentro de plugins/<mod>/, deixando config/patchers/monomod
+ * aninhados lá em vez dos locais corretos do BepInEx. Isso duplica arquivos
+ * (ex.: traduções .yml carregadas duas vezes → "Duplicate key ... will be skipped")
+ * e pode impedir o jogo de rodar. Move essas subpastas para fora.
+ */
+function migrateNestedBepInExFolders(profileRoot: string): number {
+  const pluginsRoot = path.join(profileRoot, 'BepInEx', 'plugins')
+  if (!fs.existsSync(pluginsRoot)) return 0
+  let moved = 0
+  for (const mod of fs.readdirSync(pluginsRoot)) {
+    const modDir = path.join(pluginsRoot, mod)
+    if (!fs.statSync(modDir).isDirectory()) continue
+    for (const sub of ['config', 'patchers', 'monomod']) {
+      const nested = path.join(modDir, sub)
+      if (fs.existsSync(nested) && fs.statSync(nested).isDirectory()) {
+        copyDirRecursive(nested, path.join(profileRoot, 'BepInEx', sub))
+        fs.rmSync(nested, { recursive: true, force: true })
+        moved++
+      }
+    }
+  }
+  return moved
+}
+
+/** Roda a migração acima em todos os perfis existentes (idempotente). */
+function migrateAllProfiles() {
+  try {
+    const root = getProfilesRoot()
+    if (!fs.existsSync(root)) return
+    for (const profile of fs.readdirSync(root)) {
+      const p = path.join(root, profile)
+      try {
+        if (fs.statSync(p).isDirectory()) {
+          const n = migrateNestedBepInExFolders(p)
+          if (n > 0) console.log(`[migrate] ${profile}: ${n} pasta(s) movida(s) de plugins/ para BepInEx/`)
+        }
+      } catch { /* ignora erros por perfil */ }
+    }
+  } catch { /* ignora */ }
+}
+
 /** Retorna a raiz de perfis: config.modsPath se definido, senão o default. */
 function getProfilesRoot(): string {
   try {
@@ -138,6 +242,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Corrige instalações antigas com config/ aninhado dentro de plugins/ (duplicatas).
+  migrateAllProfiles()
+
   const win = createWindow()
 
   // Auto-updater — only runs in packaged builds
@@ -217,24 +324,29 @@ app.whenReady().then(() => {
         fs.mkdirSync(modFolder, { recursive: true })
         fs.copyFileSync(zipPath, path.join(modFolder, path.basename(zipPath)))
       } else {
-        // ZIP (default): extract entire archive into the mod folder
+        // ZIP (default): extract to a staging dir first, then route the package the same
+        // way r2modman does — special top-level folders (config/, patchers/, monomod/,
+        // core/, plugins/) go to their BepInEx locations instead of being dumped inside
+        // plugins/<modName>/.
         const AdmZip = require('adm-zip')
         const zip = new AdmZip(zipPath)
-        zip.extractAllTo(modFolder, true)
+        const safeName = (modName || 'mod').replace(/[^a-zA-Z0-9_-]/g, '_')
+        const staging = path.join(os.tmpdir(), `glitnir-mod-${safeName}-${Date.now()}`)
+        zip.extractAllTo(staging, true)
 
         // Detect BepInExPack: ZIP contains winhttp.dll → promote ALL framework files to profile root.
         // R2ModManager copies winhttp.dll, doorstop_config.ini, doorstop_libs/, BepInEx/core/, etc.
         // to the profile root, then does NOT keep BepInExPack in plugins/.
-        const winhttpInMod = findFileInDir(modFolder, 'winhttp.dll')
-        if (winhttpInMod) {
-          const bepinexRoot = path.dirname(winhttpInMod)
-          const profileRoot = profileDir(profile)
+        const winhttpInStaging = findFileInDir(staging, 'winhttp.dll')
+        if (winhttpInStaging) {
           // Copy everything at the BepInExPack root level to the profile root
           // (winhttp.dll, doorstop_config.ini, doorstop_libs/, BepInEx/core/, etc.)
-          copyDirRecursive(bepinexRoot, profileRoot)
-          // Remove BepInExPack from plugins/ — it lives at profile root, not in plugins
-          fs.rmSync(modFolder, { recursive: true, force: true })
+          copyDirRecursive(path.dirname(winhttpInStaging), profileDir(profile))
+        } else {
+          // Normal Thunderstore mod: route config/ → BepInEx/config/, etc.
+          routeModContents(staging, profileDir(profile), modName)
         }
+        fs.rmSync(staging, { recursive: true, force: true })
       }
 
       fs.unlinkSync(zipPath)
@@ -407,6 +519,9 @@ app.whenReady().then(() => {
       } else {
         const profileRoot = profileDir(profile)
 
+        // Corrige config/ aninhado em plugins/ neste perfil antes de copiar.
+        migrateNestedBepInExFolders(profileRoot)
+
         // Validate BepInExPack is installed in the profile
         const bepinexCoreSrc = path.join(profileRoot, 'BepInEx', 'core')
         const bepinexDllSrc = path.join(bepinexCoreSrc, 'BepInEx.dll')
@@ -435,6 +550,17 @@ app.whenReady().then(() => {
         const winhttpSrc = fs.existsSync(winhttpX64) ? winhttpX64 : winhttpRoot
         tryCopy(winhttpSrc, path.join(valheimPath, 'winhttp.dll'))
         tryCopyDir(path.join(profileRoot, 'doorstop_libs'), path.join(valheimPath, 'doorstop_libs'))
+
+        // Remove código de plugins/patchers de um launch anterior ANTES de copiar.
+        // copyDirRecursive só faz merge, nunca apaga — sem isto, mods removidos e versões
+        // antigas duplicadas ficariam presos na pasta do jogo, continuando a carregar/dar erro
+        // (ex.: "Skipping [Mod x.y] because a newer version exists"). Não mexe em config/
+        // para preservar configs gerados/editados em runtime.
+        for (const sub of ['plugins', 'patchers']) {
+          try { fs.rmSync(path.join(valheimPath, 'BepInEx', sub), { recursive: true, force: true }) }
+          catch { /* em uso? ignora — o merge sobrescreve por cima */ }
+        }
+
         tryCopyDir(path.join(profileRoot, 'BepInEx'), path.join(valheimPath, 'BepInEx'))
 
         if (!fs.existsSync(path.join(valheimPath, 'winhttp.dll'))) {
