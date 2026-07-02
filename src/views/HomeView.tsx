@@ -168,23 +168,21 @@ export default function HomeView({
 
   return (
     <div className="home-view">
-      {isAdmin && (
+      {isAdmin && !editing && (
+        <button className="home-edit-fab" onClick={startEditing} title="Editar página inicial">
+          <EditIcon /> Editar
+        </button>
+      )}
+
+      {isAdmin && editing && (
         <div className="home-edit-toolbar">
-          {!editing ? (
-            <button className="btn-ghost home-edit-toggle" onClick={startEditing}>
-              <EditIcon /> Editar página inicial
+          <span className="home-edit-label">Editando página inicial — a prévia abaixo já reflete suas mudanças</span>
+          <div className="home-edit-toolbar-actions">
+            <button className="btn-ghost" onClick={cancelEditing} disabled={saving}>Cancelar</button>
+            <button className="btn-play" style={{ width: 'auto', padding: '9px 20px' }} onClick={handleSave} disabled={saving}>
+              {saving ? 'Publicando...' : 'Salvar e publicar'}
             </button>
-          ) : (
-            <>
-              <span className="home-edit-label">Editando página inicial — a prévia abaixo já reflete suas mudanças</span>
-              <div className="home-edit-toolbar-actions">
-                <button className="btn-ghost" onClick={cancelEditing} disabled={saving}>Cancelar</button>
-                <button className="btn-play" style={{ width: 'auto', padding: '9px 20px' }} onClick={handleSave} disabled={saving}>
-                  {saving ? 'Publicando...' : 'Salvar e publicar'}
-                </button>
-              </div>
-            </>
-          )}
+          </div>
         </div>
       )}
 
@@ -220,7 +218,13 @@ export default function HomeView({
                 </button>
                 {draftImage && <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => setDraftImage('')}>✕</button>}
               </div>
-              <span className="form-hint">Tamanho recomendado: <strong>1280 × 220 px</strong>. A prévia acima já mostra o resultado.</span>
+              <span className="form-hint">
+                A caixa do banner é flexível (cresce pra preencher o espaço livre acima dos cards) e a imagem
+                sempre a preenche por completo, cortando as bordas conforme o tamanho da janela — não existe
+                mais um tamanho fixo. Recomendado: <strong>1920 × 1080 px ou maior, paisagem</strong>, com o
+                conteúdo principal centralizado (evite elementos importantes perto das bordas, eles podem ser
+                cortados). A prévia acima já mostra o resultado.
+              </span>
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label>Link (opcional)</label>
@@ -320,9 +324,8 @@ export default function HomeView({
                 </div>
                 <div className="form-group">
                   <label>Data</label>
-                  <input type="text" value={draftCards[key].date}
-                    onChange={e => setDraftCards(prev => ({ ...prev, [key]: { ...prev[key], date: e.target.value } }))}
-                    placeholder="YYYY-MM-DD" />
+                  <input type="date" lang="pt-BR" value={draftCards[key].date}
+                    onChange={e => setDraftCards(prev => ({ ...prev, [key]: { ...prev[key], date: e.target.value } }))} />
                 </div>
                 <div className="form-group">
                   <label>Imagem</label>

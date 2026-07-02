@@ -193,6 +193,20 @@ input:focus, select:focus {
   box-shadow: 0 0 0 3px rgba(58,123,213,0.2);
 }
 input::placeholder { color: var(--text-muted); }
+
+/* Native date/time inputs on a dark theme — the browser's default calendar/clock icon
+   renders black and disappears against --bg-input, so invert it to match the light text. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+  cursor: pointer;
+}
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"] {
+  color-scheme: dark;
+}
 select option { background: #0f1b2b; color: var(--text-primary); }
 
 /* ─── Cards ─── */

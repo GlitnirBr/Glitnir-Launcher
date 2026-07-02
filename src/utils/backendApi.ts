@@ -143,7 +143,9 @@ export async function uploadImage(
 
 /** Busca as notícias/home data do backend (sem autenticação). */
 export async function getNews(backendUrl?: string): Promise<any> {
-  const res = await fetch(`${base(backendUrl)}/news`)
+  // Cache-bust: sem isso, uma resposta em cache (Chromium ou CDN na frente do Worker) pode
+  // continuar sendo servida mesmo depois de publishNews() gravar dados novos.
+  const res = await fetch(`${base(backendUrl)}/news?t=${Date.now()}`, { cache: 'no-store' })
   if (!res.ok) throw new Error('Falha ao buscar notícias')
   return res.json()
 }
