@@ -1,6 +1,22 @@
+import { NewsItem } from '../components/News/NewsCard'
+
 export interface User {
   username: string
   role: 'player' | 'admin'
+}
+
+/** Payload publicado/lido de {backendUrl}/news — home page + aviso fixado + notícias + status. */
+export interface NewsData {
+  featured?: {
+    title: string
+    subtitle?: string
+    image?: string
+    link?: string
+    cta?: string
+  }
+  pinnedAlert?: { text: string; link?: string }
+  news: NewsItem[]
+  serverInfo?: { ip?: string; uptime?: string; version?: string }
 }
 
 export type ModSource = 'thunderstore' | 'private'

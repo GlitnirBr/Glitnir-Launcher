@@ -5,8 +5,8 @@ import UpdateNotification from './components/UpdateNotification/UpdateNotificati
 import InstallBar from './components/InstallBar/InstallBar'
 import { HomeView, ModsView, SettingsView, AdminView, ModpackEditorView, AboutView } from './views'
 import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated, normalizeModpack } from './utils/modManager'
-import { getAdminModpack, getPublicModpack, getNews, resolvePrivateMod } from './utils/backendApi'
-import { Config, Modpack, Mod, ModpackEntry } from './types'
+import { getAdminModpack, getPublicModpack, getNews, publishNews, resolvePrivateMod } from './utils/backendApi'
+import { Config, Modpack, Mod, ModpackEntry, NewsData } from './types'
 import { NewsItem } from './components/News'
 import newsColiseuImg from './assets/news-coliseu.png'
 import './App.css'
@@ -26,19 +26,6 @@ const FALLBACK_NEWS: NewsItem[] = [
 const VANILLA: ModpackEntry = { id: 'vanilla', name: 'Vanilla', type: 'vanilla', builtin: true }
 const MAIN: ModpackEntry = { id: 'principal', name: 'Glitnir', type: 'public' }
 const ADMIN_TEST: ModpackEntry = { id: 'admin-teste', name: 'Glitnir Admin', type: 'admin' }
-
-interface NewsData {
-  featured?: {
-    title: string
-    subtitle?: string
-    image?: string
-    link?: string
-    cta?: string
-  }
-  pinnedAlert?: { text: string; link?: string }
-  news: NewsItem[]
-  serverInfo?: { ip?: string; uptime?: string; version?: string }
-}
 
 export default function App() {
   const [config, setConfig] = useState<Config | null>(null)
@@ -254,6 +241,18 @@ export default function App() {
     })
   }
 
+  /**
+   * Publica atualizações parciais da home/notícias. Sempre funde sobre o `newsData` atual
+   * (que já tem o estado completo carregado) antes de enviar — assim, salvar só o hero na
+   * HomeView não apaga o que a AdminView salvou em serverInfo, e vice-versa.
+   */
+  async function handlePublishNews(updates: Partial<NewsData>) {
+    if (!adminToken) throw new Error('Faça login de admin para publicar.')
+    const merged: NewsData = { ...newsData, ...updates }
+    await publishNews(adminToken, merged, config?.backendUrl)
+    setNewsData(merged)
+  }
+
   async function handleInstallMods() {
     if (!modpackData || !config) return
 
@@ -436,6 +435,10 @@ export default function App() {
             serverMaxPlayers={serverMaxPlayers}
             hasBattlemetrics={!!(publicBattlemetricsId || modpackData?.battlemetricsId)}
             serverInfo={newsData.serverInfo}
+            isAdmin={isAdmin}
+            adminToken={adminToken}
+            backendUrl={config?.backendUrl}
+            onPublishNews={handlePublishNews}
           />
         )}
 
@@ -474,6 +477,8 @@ export default function App() {
             config={config}
             adminToken={adminToken}
             onSave={handleSaveConfig}
+            serverInfo={newsData.serverInfo}
+            onPublishNews={handlePublishNews}
           />
         )}
       </Layout>

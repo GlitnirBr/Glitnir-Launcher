@@ -1,14 +1,16 @@
 import { useState } from 'react'
-import { Config } from '../types'
+import { Config, NewsData } from '../types'
 import './AdminView.css'
 
 interface Props {
   config: Config
   adminToken: string | null
   onSave: (updates: Partial<Config>) => Promise<void>
+  serverInfo?: { ip?: string; uptime?: string; version?: string }
+  onPublishNews?: (updates: Partial<NewsData>) => Promise<void>
 }
 
-export default function AdminView({ config, onSave }: Props) {
+export default function AdminView({ config, onSave, serverInfo, onPublishNews }: Props) {
   const [backendUrl, setBackendUrl] = useState(config.backendUrl || '')
   const [modpackRepo, setModpackRepo] = useState(config.modpackRepo || '')
   const [modpackBranch, setModpackBranch] = useState(config.modpackBranch || 'main')
@@ -20,11 +22,23 @@ export default function AdminView({ config, onSave }: Props) {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
 
+  const [serverIp, setServerIp] = useState(serverInfo?.ip || '')
+  const [serverUptime, setServerUptime] = useState(serverInfo?.uptime || '')
+  const [serverVersion, setServerVersion] = useState(serverInfo?.version || '')
+  const [savingInfo, setSavingInfo] = useState(false)
+  const [savedInfo, setSavedInfo] = useState(false)
+  const [infoError, setInfoError] = useState('')
+
   const hasChanges =
     backendUrl !== (config.backendUrl || '') ||
     modpackRepo !== (config.modpackRepo || '') ||
     modpackBranch !== (config.modpackBranch || 'main') ||
     newsUrl !== (config.newsUrl || '')
+
+  const hasInfoChanges =
+    serverIp !== (serverInfo?.ip || '') ||
+    serverUptime !== (serverInfo?.uptime || '') ||
+    serverVersion !== (serverInfo?.version || '')
 
   async function handleToggleServer() {
     setTogglingServer(true)
@@ -34,6 +48,28 @@ export default function AdminView({ config, onSave }: Props) {
       setServerOnline(next)
     } finally {
       setTogglingServer(false)
+    }
+  }
+
+  async function handleSaveServerInfo() {
+    if (!onPublishNews) return
+    setSavingInfo(true)
+    setSavedInfo(false)
+    setInfoError('')
+    try {
+      await onPublishNews({
+        serverInfo: {
+          ip: serverIp || undefined,
+          uptime: serverUptime || undefined,
+          version: serverVersion || undefined,
+        },
+      })
+      setSavedInfo(true)
+      setTimeout(() => setSavedInfo(false), 2000)
+    } catch (err: any) {
+      setInfoError(err.message || 'Falha ao salvar')
+    } finally {
+      setSavingInfo(false)
     }
   }
 
@@ -56,7 +92,7 @@ export default function AdminView({ config, onSave }: Props) {
     <div className="admin-view">
       <div className="admin-header">
         <h1>Painel Admin</h1>
-        <p className="text-secondary">Configurações de backend, repositório e notícias.</p>
+        <p className="text-secondary">Status do servidor, backend e repositório do modpack.</p>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
@@ -77,6 +113,28 @@ export default function AdminView({ config, onSave }: Props) {
               disabled={togglingServer}
             >
               {togglingServer ? 'Salvando...' : serverOnline ? 'Colocar Offline' : 'Colocar Online'}
+            </button>
+          </div>
+
+          <div className="form-group" style={{ marginTop: 20 }}>
+            <label>IP do servidor</label>
+            <input type="text" value={serverIp} onChange={e => setServerIp(e.target.value)}
+              placeholder="glitnir.gg:2456" style={{ fontFamily: 'monospace' }} />
+          </div>
+          <div className="form-group">
+            <label>Uptime / Temporada</label>
+            <input type="text" value={serverUptime} onChange={e => setServerUptime(e.target.value)}
+              placeholder="Season 3 — 42 dias" />
+          </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label>Versão do servidor</label>
+            <input type="text" value={serverVersion} onChange={e => setServerVersion(e.target.value)}
+              placeholder="0.219.14" style={{ fontFamily: 'monospace' }} />
+          </div>
+          {infoError && <div className="error-banner" style={{ marginTop: 16 }}>{infoError}</div>}
+          <div className="admin-actions" style={{ marginTop: 16 }}>
+            <button className="btn-secondary" onClick={handleSaveServerInfo} disabled={!hasInfoChanges || savingInfo}>
+              {savingInfo ? 'Salvando...' : savedInfo ? 'Salvo!' : 'Salvar informações do servidor'}
             </button>
           </div>
         </div>

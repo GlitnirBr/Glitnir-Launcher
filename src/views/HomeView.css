@@ -4,6 +4,55 @@
   height: 100%;
 }
 
+/* Admin inline editor */
+.home-edit-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 10px 20px;
+  background: rgba(58, 123, 213, 0.08);
+  border-bottom: 1px solid rgba(58, 123, 213, 0.18);
+  flex-shrink: 0;
+}
+
+.home-edit-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.home-edit-label {
+  font-size: 13px;
+  color: var(--accent-blue-hover);
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.home-edit-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.home-edit-error {
+  margin: 12px 20px 0;
+}
+
+.home-edit-form {
+  margin: 16px 20px 0;
+  flex-shrink: 0;
+}
+
+.home-edit-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  padding: 16px 20px 20px;
+  flex-shrink: 0;
+}
+
 .home-cards-grid {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr minmax(180px, 215px);
