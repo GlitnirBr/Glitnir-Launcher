@@ -22,7 +22,12 @@ export default function ModsView({
   const [error, setError] = useState('')
 
   const isVanilla = selectedModpackId === 'vanilla'
-  const needsUpdate = mods.some(m => !m.optionalDisabled && (m.outdated || !m.installed))
+  // Precisa agir quando: um mod ativo está faltando/desatualizado, OU um opcional foi desativado
+  // mas ainda está instalado no disco (precisa ser removido — senão continua carregando no jogo).
+  const needsUpdate = mods.some(m =>
+    (!m.optionalDisabled && (m.outdated || !m.installed)) ||
+    (m.optionalDisabled && m.installed)
+  )
   const installedCount = mods.filter(m => m.optionalDisabled || (m.installed && !m.outdated)).length
   const totalCount = mods.length
 

@@ -23,6 +23,9 @@ export async function login(password: string, backendUrl?: string): Promise<stri
 
 /** Busca o modpack público via backend (sem autenticação). */
 export async function getPublicModpack(backendUrl?: string): Promise<Modpack> {
+  // Sem cache-bust/no-store de propósito: o Worker serve com ETag e cacheia na borda (KV).
+  // Assim o cache HTTP do Electron revalida sozinho com If-None-Match → 304 quando nada mudou,
+  // e o polling não fura a borda nem executa o Worker à toa.
   const res = await fetch(`${base(backendUrl)}/modpacks/main`)
   if (!res.ok) throw new Error('Falha ao buscar modpack público')
   return res.json()
@@ -30,6 +33,7 @@ export async function getPublicModpack(backendUrl?: string): Promise<Modpack> {
 
 /** Busca o modpack secreto de admin (requer token válido). */
 export async function getAdminModpack(token: string, backendUrl?: string): Promise<Modpack> {
+  // Sem cache-bust/no-store: revalidação via ETag (If-None-Match → 304) como no getPublicModpack.
   const res = await fetch(`${base(backendUrl)}/modpacks/admin`, {
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -143,9 +147,9 @@ export async function uploadImage(
 
 /** Busca as notícias/home data do backend (sem autenticação). */
 export async function getNews(backendUrl?: string): Promise<any> {
-  // Cache-bust: sem isso, uma resposta em cache (Chromium ou CDN na frente do Worker) pode
-  // continuar sendo servida mesmo depois de publishNews() gravar dados novos.
-  const res = await fetch(`${base(backendUrl)}/news?t=${Date.now()}`, { cache: 'no-store' })
+  // Sem cache-bust/no-store: o Worker serve com ETag e o publishNews() atualiza o KV/purga a
+  // borda, então o cache HTTP do Electron revalida sozinho (If-None-Match → 304) sem servir stale.
+  const res = await fetch(`${base(backendUrl)}/news`)
   if (!res.ok) throw new Error('Falha ao buscar notícias')
   return res.json()
 }

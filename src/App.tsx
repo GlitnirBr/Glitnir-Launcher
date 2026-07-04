@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Layout from './components/Layout/Layout'
 import AdminLoginModal from './components/Admin/AdminLoginModal'
 import UpdateNotification from './components/UpdateNotification/UpdateNotification'
@@ -124,8 +124,8 @@ export default function App() {
 
       setModpackData(data)
       const installed = config.installedByProfile?.[entry.id] || []
-      const disabledOptional = config.optionalModsDisabled?.[entry.id] || []
-      setMods(checkOutdated(installed, data, disabledOptional))
+      const enabledOptional = config.optionalModsEnabled?.[entry.id] || []
+      setMods(checkOutdated(installed, data, enabledOptional))
     } catch (err) {
       console.error('Falha ao carregar modpack:', err)
       setModpackData(null)
@@ -166,6 +166,61 @@ export default function App() {
     if (config) {
       loadModpack()
       loadNews()
+    }
+  }, [config, loadModpack, loadNews])
+
+  // Mantém modpack e notícias atualizados sem precisar reabrir o launcher, com o mínimo de carga
+  // no Worker do backend:
+  //   - re-busca imediatamente ao voltar o foco para a janela (cobre "acabei de publicar");
+  //   - enquanto a janela está VISÍVEL, faz um poll lento (5 min);
+  //   - quando a janela é minimizada/escondida, PARA o poll — launcher em 2º plano = 0 requisições.
+  // Assim a carga escala com jogadores ativos olhando a tela, não com launchers abertos ociosos.
+  // As buscas revalidam via ETag (If-None-Match → 304 quando nada mudou), então o poll é barato.
+  // Ref para ler o estado "ocupado" mais recente sem re-assinar o listener/interval a cada toggle.
+  const busyRef = useRef(false)
+  busyRef.current = installing || isPlaying
+
+  useEffect(() => {
+    if (!config) return
+
+    let interval: ReturnType<typeof setInterval> | null = null
+
+    const refresh = () => {
+      // Não re-buscar no meio de uma instalação/launch: loadModpack() sobrescreveria o estado
+      // otimista de `mods` (via setMods/checkOutdated) e atrapalharia o fluxo em andamento.
+      if (busyRef.current) return
+      loadModpack()
+      loadNews()
+    }
+
+    const startPolling = () => {
+      if (interval) return
+      interval = setInterval(refresh, 5 * 60_000)
+    }
+    const stopPolling = () => {
+      if (interval) { clearInterval(interval); interval = null }
+    }
+
+    // Alt-tab de volta para a janela: atualiza na hora.
+    const onFocus = () => refresh()
+    // Minimizar/restaurar: liga/desliga o poll de fundo conforme a visibilidade.
+    const onVisibility = () => {
+      if (document.hidden) {
+        stopPolling()
+      } else {
+        refresh()
+        startPolling()
+      }
+    }
+
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    if (!document.hidden) startPolling()
+
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+      stopPolling()
     }
   }, [config, loadModpack, loadNews])
 
@@ -236,11 +291,12 @@ export default function App() {
   /** Liga/desliga um mod opcional para o perfil atual — reflete na lista e no próximo install. */
   async function handleToggleOptionalMod(modName: string, enabled: boolean) {
     const profile = selectedModpack
-    const current = new Set(config?.optionalModsDisabled?.[profile] || [])
-    if (enabled) current.delete(modName)
-    else current.add(modName)
+    // Opt-in: guardamos os ATIVADOS. Ligar adiciona; desligar remove.
+    const current = new Set(config?.optionalModsEnabled?.[profile] || [])
+    if (enabled) current.add(modName)
+    else current.delete(modName)
     await handleSaveConfig({
-      optionalModsDisabled: { ...(config?.optionalModsDisabled || {}), [profile]: Array.from(current) },
+      optionalModsEnabled: { ...(config?.optionalModsEnabled || {}), [profile]: Array.from(current) },
     })
   }
 
@@ -354,7 +410,12 @@ export default function App() {
       // instead of launching into a missing BepInEx.dll.
       if (selectedModpack !== 'vanilla') {
         const bepinexOk = await window.glitnir.mods.bepinexOk({ profile: selectedModpack })
-        const hasPending = mods.some(m => !m.optionalDisabled && (!m.installed || m.outdated))
+        // Pendência = mod ativo faltando/desatualizado OU opcional desativado ainda instalado
+        // (precisa ser removido antes de lançar, senão continua carregando no jogo).
+        const hasPending = mods.some(m =>
+          (!m.optionalDisabled && (!m.installed || m.outdated)) ||
+          (m.optionalDisabled && m.installed)
+        )
         if (!bepinexOk || hasPending) {
           await handleInstallMods()
         }

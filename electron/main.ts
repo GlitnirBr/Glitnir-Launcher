@@ -38,6 +38,48 @@ function copyDirRecursive(src: string, dest: string) {
   }
 }
 
+/** Lista arquivos de uma pasta recursivamente, como caminhos relativos a ela. */
+function listFilesRecursive(dir: string, prefix = ''): string[] {
+  let out: string[] = []
+  for (const entry of fs.readdirSync(dir)) {
+    const full = path.join(dir, entry)
+    const rel = prefix ? path.join(prefix, entry) : entry
+    if (fs.statSync(full).isDirectory()) out = out.concat(listFilesRecursive(full, rel))
+    else out.push(rel)
+  }
+  return out
+}
+
+/**
+ * Caminho do manifesto de um mod dentro do perfil. Registra os arquivos que o install
+ * roteou para PASTAS COMPARTILHADAS (patchers/monomod/core) — que o mods:remove não teria
+ * como localizar de outra forma, já que seus nomes não têm relação com o nome do mod.
+ */
+function modManifestPath(profileRoot: string, modName: string): string {
+  const safe = (modName || 'mod').replace(/[^a-zA-Z0-9_-]/g, '_')
+  return path.join(profileRoot, '.glitnir', 'installed', `${safe}.json`)
+}
+
+/** Grava o manifesto de um mod com a lista de arquivos externos (relativos ao perfil). */
+function writeModManifest(profileRoot: string, modName: string, external: string[]) {
+  const mf = modManifestPath(profileRoot, modName)
+  fs.mkdirSync(path.dirname(mf), { recursive: true })
+  fs.writeFileSync(mf, JSON.stringify({ external }, null, 2))
+}
+
+/** Sobe removendo pastas que ficaram vazias, parando em (sem apagar) `stop`. */
+function pruneEmptyParents(fileAbs: string, stop: string) {
+  const stopAbs = path.resolve(stop)
+  let dir = path.dirname(path.resolve(fileAbs))
+  while (dir.startsWith(stopAbs + path.sep) && dir !== stopAbs) {
+    try {
+      if (fs.readdirSync(dir).length > 0) break
+      fs.rmdirSync(dir)
+      dir = path.dirname(dir)
+    } catch { break }
+  }
+}
+
 /** Localiza o BepInEx Preloader dentro de <perfil>/BepInEx/core (nome varia por runtime). */
 function findPreloaderDll(coreDir: string): string | null {
   if (!fs.existsSync(coreDir)) return null
@@ -113,7 +155,7 @@ const BEPINEX_ROUTES: Record<string, string> = {
  *   plugins/  → BepInEx/plugins/<modName>/
  *   restante (dll solta, manifest, readme, icon, assets…) → BepInEx/plugins/<modName>/
  */
-function routeModContents(staging: string, profileRoot: string, modName: string) {
+function routeModContents(staging: string, profileRoot: string, modName: string): string[] {
   // Desce por pastas-invólucro (uma única subpasta, sem arquivos soltos) até a raiz do pacote.
   let root = staging
   for (;;) {
@@ -128,6 +170,9 @@ function routeModContents(staging: string, profileRoot: string, modName: string)
   }
 
   const pluginTarget = path.join(profileRoot, 'BepInEx', 'plugins', modName)
+  // Arquivos criados em pastas compartilhadas (patchers/monomod/core), para o mods:remove.
+  // config/ NÃO entra aqui: é preservado na remoção, igual ao r2modman.
+  const external: string[] = []
 
   for (const entry of fs.readdirSync(root)) {
     const full = path.join(root, entry)
@@ -136,7 +181,13 @@ function routeModContents(staging: string, profileRoot: string, modName: string)
 
     if (routed && routed !== 'plugins') {
       // config / patchers / monomod / core → BepInEx/<routed>/ (mantém subestrutura)
-      copyDirRecursive(full, path.join(profileRoot, 'BepInEx', routed))
+      const destDir = path.join(profileRoot, 'BepInEx', routed)
+      copyDirRecursive(full, destDir)
+      if (routed !== 'config') {
+        for (const rel of listFilesRecursive(full)) {
+          external.push(path.relative(profileRoot, path.join(destDir, rel)))
+        }
+      }
     } else if (routed === 'plugins') {
       // conteúdo de plugins/ do pacote entra na pasta do próprio mod
       copyDirRecursive(full, pluginTarget)
@@ -149,6 +200,8 @@ function routeModContents(staging: string, profileRoot: string, modName: string)
       fs.copyFileSync(full, path.join(pluginTarget, entry))
     }
   }
+
+  return external
 }
 
 /**
@@ -375,6 +428,8 @@ app.whenReady().then(() => {
         // DLL: copy directly into the mod's own plugin folder so BepInEx can find it
         fs.mkdirSync(modFolder, { recursive: true })
         fs.copyFileSync(zipPath, path.join(modFolder, path.basename(zipPath)))
+        // Sem arquivos em pastas compartilhadas: manifesto vazio (remoção só apaga o plugin).
+        writeModManifest(profileDir(profile), modName, [])
       } else {
         // ZIP (default): extract to a staging dir first, then route the package the same
         // way r2modman does — special top-level folders (config/, patchers/, monomod/,
@@ -396,7 +451,9 @@ app.whenReady().then(() => {
           copyDirRecursive(path.dirname(winhttpInStaging), profileDir(profile))
         } else {
           // Normal Thunderstore mod: route config/ → BepInEx/config/, etc.
-          routeModContents(staging, profileDir(profile), modName)
+          const external = routeModContents(staging, profileDir(profile), modName)
+          // Registra os arquivos roteados p/ pastas compartilhadas para o mods:remove limpá-los.
+          writeModManifest(profileDir(profile), modName, external)
         }
         fs.rmSync(staging, { recursive: true, force: true })
       }
@@ -560,11 +617,35 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('mods:remove', (_e, { modName, profile }) => {
-    const modPath = path.join(profileDir(profile), 'BepInEx', 'plugins', modName)
-    if (fs.existsSync(modPath)) {
-      fs.rmSync(modPath, { recursive: true })
-      return { success: true }
+    const profileRoot = profileDir(profile)
+    const modPath = path.join(profileRoot, 'BepInEx', 'plugins', modName)
+    const existed = fs.existsSync(modPath)
+    if (existed) fs.rmSync(modPath, { recursive: true, force: true })
+
+    // Além do plugin, apaga o que o mod roteou para pastas compartilhadas (patchers/monomod/core),
+    // registrado no manifesto do install. Sem isso, um patcher removido continua carregando no jogo.
+    // Configs não entram no manifesto — preservados de propósito, como no r2modman.
+    const mf = modManifestPath(profileRoot, modName)
+    let removedExternal = 0
+    if (fs.existsSync(mf)) {
+      try {
+        const { external = [] } = JSON.parse(fs.readFileSync(mf, 'utf-8')) as { external?: string[] }
+        const bepinex = path.join(profileRoot, 'BepInEx')
+        for (const rel of external) {
+          // Segurança: só apaga dentro do perfil (bloqueia path traversal em manifesto adulterado).
+          const target = path.resolve(profileRoot, rel)
+          if (target !== profileRoot && !target.startsWith(path.resolve(profileRoot) + path.sep)) continue
+          if (fs.existsSync(target)) {
+            fs.rmSync(target, { force: true })
+            removedExternal++
+            pruneEmptyParents(target, bepinex)
+          }
+        }
+        fs.rmSync(mf, { force: true })
+      } catch { /* manifesto corrompido: plugin já foi removido, segue o jogo */ }
     }
+
+    if (existed || removedExternal > 0) return { success: true }
     return { success: false, error: 'Mod não encontrado' }
   })
 

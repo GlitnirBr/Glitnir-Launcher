@@ -77,8 +77,11 @@ export interface Config {
   installedMods: { name: string; version: string }[]
   /** Mods instalados por perfil/modpack (id -> lista). */
   installedByProfile?: Record<string, { name: string; version: string }[]>
-  /** Mods opcionais que o jogador desativou, por perfil/modpack (id -> nomes dos mods). */
-  optionalModsDisabled?: Record<string, string[]>
+  /**
+   * Mods opcionais que o jogador ATIVOU, por perfil/modpack (id -> nomes dos mods).
+   * Opcional é opt-in: fica desativado (não instala) até o player ligar o toggle.
+   */
+  optionalModsEnabled?: Record<string, string[]>
   selectedModpack?: string
   /** URL base do backend (Cloudflare Worker). */
   backendUrl?: string
