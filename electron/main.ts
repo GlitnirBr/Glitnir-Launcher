@@ -891,10 +891,24 @@ app.whenReady().then(() => {
       if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
         return { success: false, error: 'Pasta não encontrada' }
       }
-      const files = fs.readdirSync(dir)
-        .filter(f => !fs.statSync(path.join(dir, f)).isDirectory())
-        .filter(f => /\.(cfg|json|yaml|yml|ini|toml|txt)$/i.test(f))
-        .sort()
+      // Percorre subpastas: vários mods guardam configs em pastas próprias dentro de
+      // BepInEx/config/ (ex.: config/DistantOrigins/Translations/Mod.yml). Sem recursão esses
+      // arquivos nunca apareciam no editor. Retornamos caminhos RELATIVOS em estilo posix (/),
+      // que o frontend concatena com o dir (readFile/writeFile) e usa como installPath.
+      const CONFIG_RE = /\.(cfg|json|yaml|yml|ini|toml|txt)$/i
+      const files: string[] = []
+      const walk = (current: string, rel: string) => {
+        for (const name of fs.readdirSync(current)) {
+          const abs = path.join(current, name)
+          const relPath = rel ? `${rel}/${name}` : name
+          let stat: fs.Stats
+          try { stat = fs.statSync(abs) } catch { continue }
+          if (stat.isDirectory()) walk(abs, relPath)
+          else if (CONFIG_RE.test(name)) files.push(relPath)
+        }
+      }
+      walk(dir, '')
+      files.sort()
       return { success: true, files }
     } catch (err: any) {
       return { success: false, error: err.message }
