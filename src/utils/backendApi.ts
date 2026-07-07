@@ -173,16 +173,18 @@ export async function publishNews(token: string, news: object, backendUrl?: stri
 /**
  * Resolve a URL/headers de download de um mod privado.
  * O `downloadUrl` do manifesto é um caminho relativo (ex: /mods/private/Foo.zip)
- * que será resolvido contra o backend, com o header de autenticação.
+ * que será resolvido contra o backend. O backend serve estes mods sem exigir
+ * login (o modpack público pode referenciá-los), então o token é opcional; só
+ * é enviado quando um admin está logado.
  */
 export function resolvePrivateMod(
   downloadUrl: string,
-  token: string,
+  token?: string | null,
   backendUrl?: string,
 ): PrivateModDownload {
   const path = downloadUrl.startsWith('/') ? downloadUrl : `/${downloadUrl}`
   return {
     url: `${base(backendUrl)}${path}`,
-    headers: { Authorization: `Bearer ${token}` },
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   }
 }

@@ -371,7 +371,9 @@ export default function App() {
         let headers: Record<string, string> | undefined
 
         if (mod.source === 'private') {
-          if (!adminToken) throw new Error('Faça login de admin para baixar mods privados')
+          // Mods privados são hospedados no repo privado, mas o backend serve o
+          // download sem exigir login — qualquer jogador precisa conseguir baixar
+          // os mods do modpack público. O token só é enviado se o admin estiver logado.
           const resolved = resolvePrivateMod(mod.downloadUrl, adminToken, config.backendUrl)
           url = resolved.url
           headers = resolved.headers
