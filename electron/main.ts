@@ -80,6 +80,104 @@ function pruneEmptyParents(fileAbs: string, stop: string) {
   }
 }
 
+/** Move um arquivo/pasta (rename rápido no mesmo disco; cai p/ copy+rm se cruzar discos). */
+function movePath(src: string, dest: string) {
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  try {
+    fs.renameSync(src, dest)
+  } catch (e: any) {
+    if (e.code === 'EXDEV' || e.code === 'EPERM' || e.code === 'ENOTEMPTY') {
+      if (fs.statSync(src).isDirectory()) {
+        copyDirRecursive(src, dest)
+        fs.rmSync(src, { recursive: true, force: true })
+      } else {
+        fs.copyFileSync(src, dest)
+        fs.rmSync(src, { force: true })
+      }
+    } else throw e
+  }
+}
+
+/** Depósito de um mod desativado dentro do perfil (fora da árvore que o BepInEx varre). */
+function disabledStoreDir(profileRoot: string, modName: string): string {
+  const safe = (modName || 'mod').replace(/[^a-zA-Z0-9_-]/g, '_')
+  return path.join(profileRoot, '.glitnir', 'disabled', safe)
+}
+
+/**
+ * Desativa um mod SEM apagar (estilo r2modman): MOVE a pasta do plugin e os arquivos que o
+ * install roteou para pastas compartilhadas (patchers/monomod/core, do manifesto) para um
+ * depósito em .glitnir/disabled/<mod>/. O BepInEx para de carregá-los, mas religar não re-baixa.
+ * Retorna { moved } — moved=false quando não havia nada instalado (nada a mover).
+ */
+function disableModFiles(profileRoot: string, modName: string, version?: string): { moved: boolean; version?: string } {
+  const store = disabledStoreDir(profileRoot, modName)
+  const pluginDir = path.join(profileRoot, 'BepInEx', 'plugins', modName)
+  const hadPlugin = fs.existsSync(pluginDir)
+
+  // Arquivos externos (patchers/monomod/core) registrados no manifesto do install.
+  const mf = modManifestPath(profileRoot, modName)
+  let external: string[] = []
+  if (fs.existsSync(mf)) {
+    try { external = (JSON.parse(fs.readFileSync(mf, 'utf-8')).external || []) as string[] } catch { /* ignora */ }
+  }
+
+  if (!hadPlugin && external.length === 0) return { moved: false }
+
+  // Zera um depósito antigo (ex.: religar interrompido no meio) antes de reencher.
+  if (fs.existsSync(store)) fs.rmSync(store, { recursive: true, force: true })
+
+  if (hadPlugin) movePath(pluginDir, path.join(store, 'plugins', modName))
+
+  const bepinex = path.join(profileRoot, 'BepInEx')
+  const movedExternal: string[] = []
+  for (const rel of external) {
+    const from = path.resolve(profileRoot, rel)
+    // Segurança: só mexe dentro do perfil (bloqueia path traversal em manifesto adulterado).
+    if (from !== profileRoot && !from.startsWith(path.resolve(profileRoot) + path.sep)) continue
+    if (fs.existsSync(from)) {
+      movePath(from, path.join(store, 'external', rel))
+      movedExternal.push(rel)
+      pruneEmptyParents(from, bepinex)
+    }
+  }
+
+  fs.mkdirSync(store, { recursive: true })
+  fs.writeFileSync(
+    path.join(store, 'meta.json'),
+    JSON.stringify({ modName, version: version || null, external: movedExternal }, null, 2),
+  )
+  return { moved: true, version }
+}
+
+/**
+ * Religa um mod desativado movendo os arquivos do depósito de volta aos locais ativos do
+ * BepInEx. Retorna { moved, version } — moved=false quando não há depósito (nunca instalado):
+ * nesse caso quem cuida é o fluxo normal de download/install.
+ */
+function enableModFiles(profileRoot: string, modName: string): { moved: boolean; version?: string } {
+  const store = disabledStoreDir(profileRoot, modName)
+  if (!fs.existsSync(store)) return { moved: false }
+
+  let meta: { version?: string | null; external?: string[] } = {}
+  try { meta = JSON.parse(fs.readFileSync(path.join(store, 'meta.json'), 'utf-8')) } catch { /* segue */ }
+
+  const storedPlugin = path.join(store, 'plugins', modName)
+  if (fs.existsSync(storedPlugin)) {
+    const dest = path.join(profileRoot, 'BepInEx', 'plugins', modName)
+    if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true })
+    movePath(storedPlugin, dest)
+  }
+
+  for (const rel of meta.external || []) {
+    const from = path.join(store, 'external', rel)
+    if (fs.existsSync(from)) movePath(from, path.resolve(profileRoot, rel))
+  }
+
+  fs.rmSync(store, { recursive: true, force: true })
+  return { moved: true, version: meta.version || undefined }
+}
+
 /** Localiza o BepInEx Preloader dentro de <perfil>/BepInEx/core (nome varia por runtime). */
 function findPreloaderDll(coreDir: string): string | null {
   if (!fs.existsSync(coreDir)) return null
@@ -647,6 +745,17 @@ app.whenReady().then(() => {
 
     if (existed || removedExternal > 0) return { success: true }
     return { success: false, error: 'Mod não encontrado' }
+  })
+
+  // Liga/desliga um mod opcional MOVENDO os arquivos (estilo r2modman), sem apagar/re-baixar.
+  ipcMain.handle('mods:setOptionalEnabled', (_e, { profile, modName, enabled, version }: { profile: string; modName: string; enabled: boolean; version?: string }) => {
+    try {
+      const profileRoot = profileDir(profile)
+      const r = enabled ? enableModFiles(profileRoot, modName) : disableModFiles(profileRoot, modName, version)
+      return { success: true, ...r }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   })
 
   ipcMain.handle('game:launch', async (_e, { valheimPath, mode, profile }) => {

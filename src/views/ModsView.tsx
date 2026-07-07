@@ -22,12 +22,9 @@ export default function ModsView({
   const [error, setError] = useState('')
 
   const isVanilla = selectedModpackId === 'vanilla'
-  // Precisa agir quando: um mod ativo está faltando/desatualizado, OU um opcional foi desativado
-  // mas ainda está instalado no disco (precisa ser removido — senão continua carregando no jogo).
-  const needsUpdate = mods.some(m =>
-    (!m.optionalDisabled && (m.outdated || !m.installed)) ||
-    (m.optionalDisabled && m.installed)
-  )
+  // Precisa agir só quando um mod ATIVO está faltando ou desatualizado. Desativar um opcional é
+  // instantâneo (move os arquivos para o depósito), então nunca deixa pendência aqui.
+  const needsUpdate = mods.some(m => !m.optionalDisabled && (m.outdated || !m.installed))
   const installedCount = mods.filter(m => m.optionalDisabled || (m.installed && !m.outdated)).length
   const totalCount = mods.length
 
@@ -155,16 +152,19 @@ export default function ModsView({
                     )}
                     {mod.optional && (
                       <label
-                        className="mod-optional-switch"
+                        className={`mod-optional-switch ${mod.optionalDisabled ? '' : 'is-on'}`}
                         title={mod.optionalDisabled ? 'Ativar mod opcional' : 'Desativar mod opcional'}
                         onClick={e => e.stopPropagation()}
                       >
-                        <input
-                          type="checkbox"
-                          checked={!mod.optionalDisabled}
-                          onChange={e => onToggleOptionalMod(mod.name, e.target.checked)}
-                        />
-                        {mod.optionalDisabled ? 'Desativado' : 'Ativado'}
+                        <span className="switch-label">{mod.optionalDisabled ? 'Desativado' : 'Ativado'}</span>
+                        <span className="switch-track">
+                          <input
+                            type="checkbox"
+                            checked={!mod.optionalDisabled}
+                            onChange={e => onToggleOptionalMod(mod.name, e.target.checked)}
+                          />
+                          <span className="switch-thumb" />
+                        </span>
                       </label>
                     )}
                     {!mod.optionalDisabled && mod.outdated && <span className="badge badge-warning">Desatualizado</span>}

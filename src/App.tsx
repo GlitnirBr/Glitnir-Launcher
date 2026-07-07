@@ -288,15 +288,39 @@ export default function App() {
     await loadConfig()
   }
 
-  /** Liga/desliga um mod opcional para o perfil atual — reflete na lista e no próximo install. */
+  /**
+   * Liga/desliga um mod opcional no estilo r2modman: os arquivos são MOVIDOS na hora entre a
+   * pasta ativa do BepInEx e um depósito (.glitnir/disabled) — desativar não apaga e reativar
+   * não re-baixa. Atualiza a preferência (optionalModsEnabled) e o estado físico (installedByProfile).
+   */
   async function handleToggleOptionalMod(modName: string, enabled: boolean) {
     const profile = selectedModpack
-    // Opt-in: guardamos os ATIVADOS. Ligar adiciona; desligar remove.
-    const current = new Set(config?.optionalModsEnabled?.[profile] || [])
-    if (enabled) current.add(modName)
-    else current.delete(modName)
+    const mod = mods.find(m => m.name === modName)
+
+    // Move os arquivos no disco imediatamente (se o mod já estava instalado / no depósito).
+    const res = await window.glitnir.mods.setOptionalEnabled({
+      profile, modName, enabled, version: mod?.version,
+    })
+
+    // Preferência opt-in: ligar adiciona; desligar remove.
+    const enabledSet = new Set(config?.optionalModsEnabled?.[profile] || [])
+    if (enabled) enabledSet.add(modName)
+    else enabledSet.delete(modName)
+
+    // Estado físico: só conta como "instalado" se os arquivos estão nos locais ativos do BepInEx.
+    // Reativar de volta do depósito reusa a versão guardada (mantém a detecção de desatualizado).
+    let installed = [...(config?.installedByProfile?.[profile] || [])]
+    if (enabled && res?.moved) {
+      if (!installed.some(m => m.name === modName)) {
+        installed.push({ name: modName, version: res.version || mod?.version || '0.0.0' })
+      }
+    } else if (!enabled) {
+      installed = installed.filter(m => m.name !== modName)
+    }
+
     await handleSaveConfig({
-      optionalModsEnabled: { ...(config?.optionalModsEnabled || {}), [profile]: Array.from(current) },
+      optionalModsEnabled: { ...(config?.optionalModsEnabled || {}), [profile]: Array.from(enabledSet) },
+      installedByProfile: { ...(config?.installedByProfile || {}), [profile]: installed },
     })
   }
 
@@ -327,9 +351,9 @@ export default function App() {
         ? activeMods.filter(m => !m.installed || m.outdated)
         : activeMods
 
-      // Remove mods that were installed for this profile before but are no longer active —
-      // either the admin took them out of the modpack, or the player disabled an optional one.
-      // Otherwise the old plugin folder stays on disk forever and keeps loading in-game.
+      // Remove mods that were installed for this profile before but are no longer in the modpack
+      // (the admin took them out). Disabling an optional mod is handled instantly by the toggle
+      // (files moved to the disabled store), so those don't come through here.
       const previouslyInstalled = config.installedByProfile?.[profile] || []
       const currentModNames = new Set(activeMods.map(m => m.name))
       const stale = previouslyInstalled.filter(m => !currentModNames.has(m.name))
@@ -410,12 +434,9 @@ export default function App() {
       // instead of launching into a missing BepInEx.dll.
       if (selectedModpack !== 'vanilla') {
         const bepinexOk = await window.glitnir.mods.bepinexOk({ profile: selectedModpack })
-        // Pendência = mod ativo faltando/desatualizado OU opcional desativado ainda instalado
-        // (precisa ser removido antes de lançar, senão continua carregando no jogo).
-        const hasPending = mods.some(m =>
-          (!m.optionalDisabled && (!m.installed || m.outdated)) ||
-          (m.optionalDisabled && m.installed)
-        )
+        // Pendência = mod ATIVO faltando/desatualizado. Desativar um opcional já move os arquivos
+        // para o depósito na hora, então não gera pendência de launch.
+        const hasPending = mods.some(m => !m.optionalDisabled && (!m.installed || m.outdated))
         if (!bepinexOk || hasPending) {
           await handleInstallMods()
         }

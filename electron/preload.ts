@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('glitnir', {
     list: (profile: string) => ipcRenderer.invoke('mods:list', profile),
     remove: (args: { modName: string; profile: string }) =>
       ipcRenderer.invoke('mods:remove', args),
+    setOptionalEnabled: (args: { profile: string; modName: string; enabled: boolean; version?: string }) =>
+      ipcRenderer.invoke('mods:setOptionalEnabled', args),
     applyConfig: (args: { profile: string; installPath: string; content: string }) =>
       ipcRenderer.invoke('mods:applyConfig', args),
     readConfigsFromZip: (args: { url: string }) =>
