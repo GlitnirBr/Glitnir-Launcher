@@ -297,31 +297,44 @@ export default function App() {
     const profile = selectedModpack
     const mod = mods.find(m => m.name === modName)
 
-    // Move os arquivos no disco imediatamente (se o mod já estava instalado / no depósito).
-    const res = await window.glitnir.mods.setOptionalEnabled({
-      profile, modName, enabled, version: mod?.version,
-    })
+    // Feedback imediato: o checkbox é controlado por `optionalDisabled`, então sem isto o toggle
+    // só se moveria DEPOIS do IPC + do re-fetch do modpack em loadModpack — segundos em um backend
+    // lento, dando a impressão de que "o toggle não funciona". Reflete a escolha na hora e reverte
+    // só se o IPC falhar.
+    setMods(prev => prev.map(m => (m.name === modName ? { ...m, optionalDisabled: !enabled } : m)))
 
-    // Preferência opt-in: ligar adiciona; desligar remove.
-    const enabledSet = new Set(config?.optionalModsEnabled?.[profile] || [])
-    if (enabled) enabledSet.add(modName)
-    else enabledSet.delete(modName)
+    try {
+      // Move os arquivos no disco imediatamente (se o mod já estava instalado / no depósito).
+      const res = await window.glitnir.mods.setOptionalEnabled({
+        profile, modName, enabled, version: mod?.version,
+      })
+      if (res && res.success === false) throw new Error(res.error || 'Falha ao alternar mod opcional')
 
-    // Estado físico: só conta como "instalado" se os arquivos estão nos locais ativos do BepInEx.
-    // Reativar de volta do depósito reusa a versão guardada (mantém a detecção de desatualizado).
-    let installed = [...(config?.installedByProfile?.[profile] || [])]
-    if (enabled && res?.moved) {
-      if (!installed.some(m => m.name === modName)) {
-        installed.push({ name: modName, version: res.version || mod?.version || '0.0.0' })
+      // Preferência opt-in: ligar adiciona; desligar remove.
+      const enabledSet = new Set(config?.optionalModsEnabled?.[profile] || [])
+      if (enabled) enabledSet.add(modName)
+      else enabledSet.delete(modName)
+
+      // Estado físico: só conta como "instalado" se os arquivos estão nos locais ativos do BepInEx.
+      // Reativar de volta do depósito reusa a versão guardada (mantém a detecção de desatualizado).
+      let installed = [...(config?.installedByProfile?.[profile] || [])]
+      if (enabled && res?.moved) {
+        if (!installed.some(m => m.name === modName)) {
+          installed.push({ name: modName, version: res.version || mod?.version || '0.0.0' })
+        }
+      } else if (!enabled) {
+        installed = installed.filter(m => m.name !== modName)
       }
-    } else if (!enabled) {
-      installed = installed.filter(m => m.name !== modName)
-    }
 
-    await handleSaveConfig({
-      optionalModsEnabled: { ...(config?.optionalModsEnabled || {}), [profile]: Array.from(enabledSet) },
-      installedByProfile: { ...(config?.installedByProfile || {}), [profile]: installed },
-    })
+      await handleSaveConfig({
+        optionalModsEnabled: { ...(config?.optionalModsEnabled || {}), [profile]: Array.from(enabledSet) },
+        installedByProfile: { ...(config?.installedByProfile || {}), [profile]: installed },
+      })
+    } catch (err) {
+      // Reverte o feedback otimista — o disco/config não mudaram.
+      console.error('Falha ao alternar mod opcional:', err)
+      setMods(prev => prev.map(m => (m.name === modName ? { ...m, optionalDisabled: enabled } : m)))
+    }
   }
 
   /**
