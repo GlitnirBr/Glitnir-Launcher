@@ -82,6 +82,12 @@ export interface Config {
    * Opcional é opt-in: fica desativado (não instala) até o player ligar o toggle.
    */
   optionalModsEnabled?: Record<string, string[]>
+  /**
+   * Hash do conjunto de configs do modpack já aplicado por perfil (id -> hash).
+   * Permite reaplicar os configs quando o admin muda SÓ os configs (sem bump de
+   * versão de mod), sem reescrever os arquivos — e apagar ajustes locais — a cada launch.
+   */
+  configsHashByProfile?: Record<string, string>
   selectedModpack?: string
   /** URL base do backend (Cloudflare Worker). */
   backendUrl?: string

@@ -146,7 +146,7 @@ export default function AdminView({ config, onSave, serverInfo, onPublishNews }:
           <div className="form-group">
             <label>URL do Backend (Cloudflare)</label>
             <input type="text" value={backendUrl} onChange={e => setBackendUrl(e.target.value)}
-              placeholder="https://glitnir-launcher-backend.workers.dev" />
+              placeholder="https://glitnir-launcher-backend.glitnir-valhala.workers.dev" />
             <span className="form-hint">Usado para login, publicar modpacks e mods privados.</span>
           </div>
           <div className="form-group">

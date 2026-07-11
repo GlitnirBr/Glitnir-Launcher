@@ -1,6 +1,18 @@
 import { Modpack, PrivateModDownload } from '../types'
 
-export const DEFAULT_BACKEND_URL = 'https://glitnir-launcher-backend.glitnir.workers.dev'
+export const DEFAULT_BACKEND_URL = 'https://glitnir-launcher-backend.glitnir-valhala.workers.dev'
+
+/** URLs de backend antigas que saíram do ar — tratadas como vazias para cair no DEFAULT_BACKEND_URL. */
+const LEGACY_BACKEND_URLS = [
+  'https://glitnir-launcher-backend.glitnir.workers.dev',
+]
+
+/** Normaliza uma backendUrl salva: retorna '' se for uma URL legada (ou vazia), forçando o default. */
+export function normalizeBackendUrl(backendUrl?: string): string {
+  const trimmed = (backendUrl || '').replace(/\/+$/, '')
+  if (!trimmed) return ''
+  return LEGACY_BACKEND_URLS.some(u => u.replace(/\/+$/, '') === trimmed) ? '' : trimmed
+}
 
 function base(backendUrl?: string): string {
   return (backendUrl || DEFAULT_BACKEND_URL).replace(/\/+$/, '')

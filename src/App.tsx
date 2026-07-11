@@ -4,8 +4,8 @@ import AdminLoginModal from './components/Admin/AdminLoginModal'
 import UpdateNotification from './components/UpdateNotification/UpdateNotification'
 import InstallBar from './components/InstallBar/InstallBar'
 import { HomeView, ModsView, SettingsView, AdminView, ModpackEditorView, AboutView } from './views'
-import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated, normalizeModpack } from './utils/modManager'
-import { getAdminModpack, getPublicModpack, getNews, publishNews, resolvePrivateMod } from './utils/backendApi'
+import { fetchModpackFromUrl, buildModpackRawUrl, checkOutdated, normalizeModpack, hashConfigs } from './utils/modManager'
+import { getAdminModpack, getPublicModpack, getNews, publishNews, resolvePrivateMod, normalizeBackendUrl } from './utils/backendApi'
 import { Config, Modpack, Mod, ModpackEntry, NewsData } from './types'
 import { NewsItem } from './components/News'
 import newsColiseuImg from './assets/news-coliseu.png'
@@ -64,12 +64,17 @@ export default function App() {
       // Migra ids antigos de perfil para os novos nomes de pasta (principal → glitnir).
       const LEGACY_IDS: Record<string, string> = { principal: MAIN.id, 'admin-teste': ADMIN_TEST.id }
       const selected = cfg.selectedModpack ? (LEGACY_IDS[cfg.selectedModpack] || cfg.selectedModpack) : undefined
+      // Descarta backendUrl de workers antigos (conta Cloudflare trocada) para cair no DEFAULT_BACKEND_URL.
+      const backendUrl = normalizeBackendUrl(cfg.backendUrl)
+      if (backendUrl !== (cfg.backendUrl || '')) {
+        window.glitnir.config.save({ backendUrl }).catch(() => {})
+      }
       setConfig({
         valheimPath: cfg.valheimPath || '',
         installedMods: cfg.installedMods || [],
         installedByProfile: cfg.installedByProfile || {},
         optionalModsEnabled: cfg.optionalModsEnabled || {},
-        backendUrl: cfg.backendUrl || '',
+        backendUrl,
         modpackRepo: cfg.modpackRepo || '',
         modpackBranch: cfg.modpackBranch || 'main',
         newsUrl: cfg.newsUrl || '',
@@ -419,10 +424,12 @@ export default function App() {
         })
       }
 
-      // Registra os mods instalados desse perfil.
+      // Registra os mods instalados desse perfil + o hash dos configs aplicados, para
+      // detectar mudanças só de config (sem bump de versão de mod) no próximo launch.
       const installedList = activeMods.map(m => ({ name: m.name, version: m.version || '0.0.0' }))
       const installedByProfile = { ...(config.installedByProfile || {}), [profile]: installedList }
-      await handleSaveConfig({ installedByProfile })
+      const configsHashByProfile = { ...(config.configsHashByProfile || {}), [profile]: hashConfigs(configs) }
+      await handleSaveConfig({ installedByProfile, configsHashByProfile })
 
       setInstallProgress(100)
       setInstallStatus('Concluído!')
@@ -454,7 +461,12 @@ export default function App() {
         // Pendência = mod ATIVO faltando/desatualizado. Desativar um opcional já move os arquivos
         // para o depósito na hora, então não gera pendência de launch.
         const hasPending = mods.some(m => !m.optionalDisabled && (!m.installed || m.outdated))
-        if (!bepinexOk || hasPending) {
+        // Configs mudaram = admin editou/adicionou config sem subir versão de mod. Sem isso,
+        // uma mudança só de config nunca chegava ao player (os configs eram aplicados apenas
+        // dentro de handleInstallMods, que só rodava quando havia mod pendente).
+        const configsChanged =
+          (config.configsHashByProfile?.[selectedModpack] ?? '') !== hashConfigs(modpackData?.configs)
+        if (!bepinexOk || hasPending || configsChanged) {
           await handleInstallMods()
         }
       }
