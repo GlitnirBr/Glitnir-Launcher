@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('glitnir', {
       ipcRenderer.invoke('mods:pickAndRead'),
     importR2Code: (args: { code: string }) =>
       ipcRenderer.invoke('mods:importR2Code', args),
+    pickAndImportR2File: () =>
+      ipcRenderer.invoke('mods:pickAndImportR2File'),
     openLog: (args: { valheimPath: string; profile?: string }) =>
       ipcRenderer.invoke('mods:openLog', args),
   },
@@ -60,6 +62,7 @@ contextBridge.exposeInMainWorld('glitnir', {
     pickImage: () => ipcRenderer.invoke('fs:pickImage'),
     listDir: (args: { dir: string }) => ipcRenderer.invoke('fs:listDir', args),
     readFile: (args: { filePath: string }) => ipcRenderer.invoke('fs:readFile', args),
+    readFileBase64: (args: { filePath: string }) => ipcRenderer.invoke('fs:readFileBase64', args),
     writeFile: (args: { filePath: string; content: string }) => ipcRenderer.invoke('fs:writeFile', args),
     pickJsonFile: () => ipcRenderer.invoke('fs:pickJsonFile'),
     saveFileDialog: (args: { filename: string; content: string }) => ipcRenderer.invoke('fs:saveFileDialog', args),

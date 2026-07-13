@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
-import { fetchModpackFromUrl, buildModpackRawUrl } from '../utils/modManager'
-import { getAdminModpack, getPublicModpack, publishModpack, uploadPrivateMod, listPrivateMods } from '../utils/backendApi'
+import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath } from '../utils/modManager'
+import { getAdminModpack, getPublicModpack, publishModpack, uploadPrivateMod, listPrivateMods, uploadConfig } from '../utils/backendApi'
 import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
 
@@ -101,6 +101,8 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [localFileLoading, setLocalFileLoading] = useState(false)
   const [localFileSaving, setLocalFileSaving] = useState(false)
   const [localFileSaved, setLocalFileSaved] = useState(false)
+  const [localUploading, setLocalUploading] = useState(false)
+  const [localUploadError, setLocalUploadError] = useState('')
 
 
   // Per-target drafts — persists unsaved changes when switching between modpacks
@@ -493,6 +495,10 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   async function handleOpenLocalFile(filename: string) {
     setLocalSelectedFile(filename)
     setLocalFileContent('')
+    setLocalUploadError('')
+    // Binário não é lido como texto (corromperia e o preview é inútil) — os bytes são
+    // lidos só na hora de enviar ao R2, via fs.readFileBase64 em handleAddLocalToModpack.
+    if (isBinaryConfigPath(filename)) return
     setLocalFileLoading(true)
     const result = await window.glitnir.fs.readFile({ filePath: localFilePath(filename) })
     if (result?.success) {
@@ -512,9 +518,40 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setTimeout(() => setLocalFileSaved(false), 2000)
   }
 
-  function handleAddLocalToModpack() {
-    if (!localSelectedFile || !localFileContent) return
+  async function handleAddLocalToModpack() {
+    if (!localSelectedFile) return
     const installPath = `BepInEx/config/${localSelectedFile}`
+
+    // Config BINÁRIO (ex.: spritesheet .png de emoji): não pode virar string JSON —
+    // seria corrompido em UTF-8. Lê os bytes crus (base64), sobe pro R2 e guarda a
+    // URL no content. O player baixa os bytes via applyConfig (binary-safe).
+    if (isBinaryConfigPath(localSelectedFile)) {
+      if (!adminToken) {
+        setLocalUploadError('Faça login de admin para enviar configs binários.')
+        return
+      }
+      setLocalUploading(true)
+      setLocalUploadError('')
+      try {
+        const read = await window.glitnir.fs.readFileBase64({ filePath: localFilePath(localSelectedFile) })
+        if (!read.success || !read.content) throw new Error(read.error || 'Falha ao ler o arquivo')
+        const { url } = await uploadConfig(adminToken, localSelectedFile, read.content, backendUrl)
+        // Substitui uma entrada existente com o mesmo installPath (ex.: corrigir um
+        // binário antes corrompido) em vez de só pular.
+        setModpackConfigs(prev => {
+          const next = prev.filter(c => c.installPath !== installPath)
+          return [...next, { mod: '', filename: localSelectedFile, installPath, content: url }]
+        })
+      } catch (err: any) {
+        setLocalUploadError('Falha ao enviar config binário: ' + (err.message || ''))
+      } finally {
+        setLocalUploading(false)
+      }
+      return
+    }
+
+    // Config de texto: embute o conteúdo direto no modpack.
+    if (!localFileContent) return
     if (modpackConfigs.some(c => c.filename === localSelectedFile)) return
     setModpackConfigs(prev => [...prev, {
       mod: '',
@@ -589,8 +626,20 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       setImportError(r2Result.error || 'Formato não reconhecido. Use um código Glitnir (GLITNIR-v1-…) ou R2ModManager.')
       return
     }
+    applyR2Result(r2Result.mods, r2Result.configs)
+    setImportCodeInput('')
+  }
 
-    const newMods: Mod[] = r2Result.mods.map(({ namespace, name, version }) => {
+  /**
+   * Converte o resultado de um perfil R2ModManager (código ou arquivo .r2z) para o
+   * estado do editor. Reusado por importação por código e por arquivo .r2z, já que
+   * ambos produzem a mesma estrutura { mods, configs } vinda do main process.
+   */
+  function applyR2Result(
+    mods: { namespace: string; name: string; version: string }[],
+    configs?: { filename: string; installPath: string; content: string }[],
+  ) {
+    const newMods: Mod[] = mods.map(({ namespace, name, version }) => {
       const ts = allMods.find(m => m.owner === namespace && m.name === name)
       return {
         name,
@@ -602,8 +651,8 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       }
     })
 
-    const newConfigs: ModConfig[] = (r2Result.configs ?? []).map(({ filename, installPath, content }) => {
-      // Try to match config to a mod by checking if the filename contains the mod name
+    const newConfigs: ModConfig[] = (configs ?? []).map(({ filename, installPath, content }) => {
+      // Casa o config a um mod pelo nome/namespace presente no filename.
       const matchedMod = newMods.find(m =>
         filename.toLowerCase().includes(m.name.toLowerCase()) ||
         filename.toLowerCase().includes((m.namespace ?? '').toLowerCase())
@@ -614,10 +663,21 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setModpackMods(newMods)
     if (newConfigs.length > 0) setModpackConfigs(newConfigs)
     loadedTargets.current.add(target)
-    setImportCodeInput('')
     const cfgCount = newConfigs.length
     setImportSuccess(`✓ ${newMods.length} mod${newMods.length !== 1 ? 's' : ''}${cfgCount ? ` e ${cfgCount} config${cfgCount !== 1 ? 's' : ''}` : ''} importados do R2!`)
     setTimeout(() => setImportSuccess(''), 3000)
+  }
+
+  async function handleImportR2File() {
+    setImportError('')
+    setImportSuccess('')
+    const r2Result = await window.glitnir.mods.pickAndImportR2File()
+    if (!r2Result) return // usuário cancelou o diálogo
+    if (!r2Result.success || !r2Result.mods) {
+      setImportError(r2Result.error || 'Não foi possível ler o arquivo .r2z.')
+      return
+    }
+    applyR2Result(r2Result.mods, r2Result.configs)
   }
 
   async function handleImportFile() {
@@ -1026,6 +1086,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                     <button className="btn-ghost" style={{ fontSize: 13 }} onClick={handleImportFile}>
                       Importar arquivo (.glitnir / .json)
                     </button>
+                    <button className="btn-ghost" style={{ fontSize: 13 }} onClick={handleImportR2File}>
+                      Importar perfil do R2ModManager (.r2z)
+                    </button>
                   </div>
                 </div>
                 {importError && <p className="text-error" style={{ fontSize: 12, marginTop: 8 }}>{importError}</p>}
@@ -1268,27 +1331,54 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                           <span style={{ fontSize: 13, fontWeight: 600 }}>{localSelectedFile}</span>
                           <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                              className="btn-ghost"
-                              style={{ fontSize: 12 }}
-                              onClick={handleAddLocalToModpack}
-                              disabled={modpackConfigs.some(c => c.filename === localSelectedFile)}
-                            >
-                              {modpackConfigs.some(c => c.filename === localSelectedFile) ? '✓ No modpack' : '+ Adicionar ao modpack'}
-                            </button>
-                            <button className="btn-secondary" style={{ fontSize: 12 }} onClick={handleSaveLocalFile} disabled={localFileSaving}>
-                              {localFileSaved ? 'Salvo!' : localFileSaving ? 'Salvando...' : 'Salvar no disco'}
-                            </button>
+                            {isBinaryConfigPath(localSelectedFile) ? (
+                              // Binário: sempre permite (re)enviar pro R2 — inclusive pra corrigir
+                              // um asset antes corrompido. Não há edição de texto nem "salvar no disco".
+                              <button
+                                className="btn-ghost"
+                                style={{ fontSize: 12 }}
+                                onClick={handleAddLocalToModpack}
+                                disabled={localUploading}
+                              >
+                                {localUploading
+                                  ? 'Enviando ao R2...'
+                                  : modpackConfigs.some(c => c.filename === localSelectedFile)
+                                    ? '↻ Reenviar ao R2'
+                                    : '+ Enviar binário ao R2'}
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  className="btn-ghost"
+                                  style={{ fontSize: 12 }}
+                                  onClick={handleAddLocalToModpack}
+                                  disabled={modpackConfigs.some(c => c.filename === localSelectedFile)}
+                                >
+                                  {modpackConfigs.some(c => c.filename === localSelectedFile) ? '✓ No modpack' : '+ Adicionar ao modpack'}
+                                </button>
+                                <button className="btn-secondary" style={{ fontSize: 12 }} onClick={handleSaveLocalFile} disabled={localFileSaving}>
+                                  {localFileSaved ? 'Salvo!' : localFileSaving ? 'Salvando...' : 'Salvar no disco'}
+                                </button>
+                              </>
+                            )}
                           </div>
                         </div>
-                        <textarea
-                          className="cfg-edit-textarea"
-                          value={localFileContent}
-                          onChange={e => setLocalFileContent(e.target.value)}
-                          rows={16}
-                          spellCheck={false}
-                          style={{ width: '100%' }}
-                        />
+                        {localUploadError && <p className="text-error" style={{ fontSize: 12, marginBottom: 6 }}>{localUploadError}</p>}
+                        {isBinaryConfigPath(localSelectedFile) ? (
+                          <p className="text-muted" style={{ fontSize: 12, padding: '12px 0' }}>
+                            Arquivo binário — não é editável como texto. Ele será enviado ao bucket R2
+                            e o modpack guardará a URL; os players baixam os bytes originais na instalação.
+                          </p>
+                        ) : (
+                          <textarea
+                            className="cfg-edit-textarea"
+                            value={localFileContent}
+                            onChange={e => setLocalFileContent(e.target.value)}
+                            rows={16}
+                            spellCheck={false}
+                            style={{ width: '100%' }}
+                          />
+                        )}
                       </>
                     )}
                     {!localFileLoading && !localSelectedFile && (

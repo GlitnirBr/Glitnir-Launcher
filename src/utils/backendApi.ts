@@ -157,6 +157,34 @@ export async function uploadImage(
   return res.json() as Promise<{ url: string }>
 }
 
+/**
+ * Faz upload de um config BINÁRIO (base64) para o R2 via backend e retorna a URL
+ * pública content-addressed. Usado para configs que não podem virar string JSON no
+ * modpack (ex.: spritesheet .png). O modpack passa a guardar essa URL no `content`,
+ * e o player baixa os bytes via `mods:applyConfig`.
+ * Endpoint: POST /configs/upload { filename, content(base64) } -> { url, key }
+ */
+export async function uploadConfig(
+  token: string,
+  filename: string,
+  contentBase64: string,
+  backendUrl?: string,
+): Promise<{ url: string; key: string }> {
+  const res = await fetch(`${base(backendUrl)}/configs/upload`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ filename, content: contentBase64 }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as any).error || 'Falha ao enviar config binário')
+  }
+  return res.json() as Promise<{ url: string; key: string }>
+}
+
 /** Busca as notícias/home data do backend (sem autenticação). */
 export async function getNews(backendUrl?: string): Promise<any> {
   // Sem cache-bust/no-store: o Worker serve com ETag e o publishNews() atualiza o KV/purga a

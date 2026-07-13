@@ -20,6 +20,74 @@ function safeName(name?: string): string {
 }
 
 /**
+ * Parseia os bytes de um perfil r2modman (ZIP contendo `export.r2x` + pasta `config/`)
+ * para a lista de mods e configs do Glitnir. É o MESMO conteúdo tanto de um arquivo
+ * `.r2z` local quanto do código de perfil resolvido via Thunderstore (`#r2modman` +
+ * base64), então ambos os caminhos de importação reusam esta função.
+ *
+ * Campos confirmados contra r2modmanPlus: mods[].name é "Namespace-ModName",
+ * version é {major,minor,patch}, enabled default true.
+ * Fonte: https://github.com/ebkr/r2modmanPlus
+ */
+function parseR2ProfileZip(zipBuffer: Buffer):
+  | { success: true; mods: { namespace: string; name: string; version: string }[]; configs: { filename: string; installPath: string; content: string }[] }
+  | { success: false; error: string } {
+  const AdmZip = require('adm-zip')
+  let zip: any
+  try {
+    zip = new AdmZip(zipBuffer)
+  } catch {
+    return { success: false, error: 'Arquivo não é um ZIP válido (esperado um perfil .r2z do R2ModManager)' }
+  }
+  const entry = zip.getEntry('export.r2x')
+  if (!entry) return { success: false, error: 'Arquivo export.r2x não encontrado no perfil — este não parece ser um .r2z do R2ModManager' }
+
+  const yaml = require('yaml')
+  let parsed: any
+  try {
+    parsed = yaml.parse(zip.readAsText(entry))
+  } catch (err: any) {
+    return { success: false, error: `Falha ao ler export.r2x: ${err.message}` }
+  }
+  if (typeof parsed?.profileName !== 'string' || !Array.isArray(parsed?.mods)) {
+    return { success: false, error: 'export.r2x do perfil está com formato inválido' }
+  }
+
+  const mods = parsed.mods
+    .filter((m: any) => m?.enabled === undefined || m.enabled)
+    .map((m: any) => {
+      const parts = String(m.name).split('-')
+      return {
+        namespace: parts[0],
+        name: parts.slice(1).join('-'),
+        version: `${m.version?.major ?? 0}.${m.version?.minor ?? 0}.${m.version?.patch ?? 0}`,
+      }
+    })
+    .filter((m: { namespace: string; name: string }) => m.namespace && m.name)
+
+  // Extrai configs da pasta config/ PRESERVANDO a estrutura de subpastas (ex.:
+  // config/DistantOrigins/Translations/Mod/Mod.French.yml). Achatar tudo para
+  // BepInEx/config/<nome> criava uma segunda cópia num caminho diferente do que o
+  // próprio mod instala, gerando "Duplicate key ... skipped". Mantendo o caminho, o
+  // config do perfil sobrescreve o padrão do mod — igual ao r2modman.
+  const configs: { filename: string; installPath: string; content: string }[] = []
+  zip.getEntries().forEach((e: any) => {
+    if (e.isDirectory) return
+    const name = String(e.entryName).replace(/\\/g, '/')
+    if (!name.startsWith('config/')) return
+    const rel = name.slice('config/'.length)
+    if (!rel || rel.includes('..')) return
+    configs.push({
+      filename: path.posix.basename(rel),
+      installPath: `BepInEx/config/${rel}`,
+      content: zip.readAsText(e),
+    })
+  })
+
+  return { success: true, mods, configs }
+}
+
+/**
  * Raízes cujo conteúdo o renderer pode ler/gravar via fs:* — a raiz de perfis mais
  * qualquer pasta que o usuário tenha escolhido explicitamente num diálogo do SO nesta
  * sessão. Sem isso, fs:readFile/writeFile aceitariam QUALQUER caminho do disco vindo do
@@ -697,17 +765,20 @@ app.whenReady().then(() => {
         return { success: false, error: 'Caminho de config inválido' }
       }
 
-      let finalContent = content
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+
       const trimmed = (content || '').trim()
       if (/^https?:\/\//i.test(trimmed)) {
-        // Busca só por http/https e com timeout (o conteúdo pode ser uma URL no manifesto).
+        // Config referenciado por URL (usado para binários — ex.: spritesheet .png —
+        // que não cabem como string no modpack.json). Baixa como arraybuffer e grava
+        // os BYTES crus: preserva binário E texto (bytes UTF-8 de um .cfg saem iguais).
+        // http/https-only + timeout (a URL vem de dados remotos do manifesto).
         const axios = require('axios')
-        const res = await axios.get(trimmed, { responseType: 'text', timeout: 30000, maxRedirects: 5 })
-        finalContent = typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
+        const res = await axios.get(trimmed, { responseType: 'arraybuffer', timeout: 30000, maxRedirects: 5 })
+        fs.writeFileSync(target, Buffer.from(res.data))
+      } else {
+        fs.writeFileSync(target, content)
       }
-
-      fs.mkdirSync(path.dirname(target), { recursive: true })
-      fs.writeFileSync(target, finalContent)
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -1018,7 +1089,10 @@ app.whenReady().then(() => {
       // BepInEx/config/ (ex.: config/DistantOrigins/Translations/Mod.yml). Sem recursão esses
       // arquivos nunca apareciam no editor. Retornamos caminhos RELATIVOS em estilo posix (/),
       // que o frontend concatena com o dir (readFile/writeFile) e usa como installPath.
-      const CONFIG_RE = /\.(cfg|json|yaml|yml|ini|toml|txt)$/i
+      // Texto (editável inline) + binários que alguns mods guardam em config/ (ex.:
+      // spritesheet .png de emoji). Os binários aparecem na lista para o admin poder
+      // enviá-los ao R2; o frontend detecta pelo installPath (isBinaryConfigPath).
+      const CONFIG_RE = /\.(cfg|json|yaml|yml|ini|toml|txt|png|jpe?g|gif|webp|bmp|ico|zip|dll|bin|dat)$/i
       const files: string[] = []
       const walk = (current: string, rel: string) => {
         for (const name of fs.readdirSync(current)) {
@@ -1042,6 +1116,19 @@ app.whenReady().then(() => {
     try {
       if (!isPathAllowed(filePath)) return { success: false, error: 'Acesso negado a este arquivo' }
       const content = fs.readFileSync(filePath, 'utf-8')
+      return { success: true, content }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('fs:readFileBase64', async (_e, { filePath }: { filePath: string }) => {
+    // Lê um arquivo como base64 (bytes crus), sem decodificar como UTF-8. Usado para
+    // configs binários (ex.: .png de emoji) que serão enviados ao R2 — ler como texto
+    // corromperia os bytes. Mesmo confinamento de caminho do fs:readFile.
+    try {
+      if (!isPathAllowed(filePath)) return { success: false, error: 'Acesso negado a este arquivo' }
+      const content = fs.readFileSync(filePath).toString('base64')
       return { success: true, content }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -1088,52 +1175,28 @@ app.whenReady().then(() => {
       }
       const zipBuffer = Buffer.from(profileData.slice(PREFIX.length).trim(), 'base64')
 
-      const AdmZip = require('adm-zip')
-      const zip = new AdmZip(zipBuffer)
-      const entry = zip.getEntry('export.r2x')
-      if (!entry) return { success: false, error: 'Arquivo export.r2x não encontrado no perfil baixado' }
+      return parseR2ProfileZip(zipBuffer)
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
 
-      const yaml = require('yaml')
-      const parsed = yaml.parse(zip.readAsText(entry))
-      if (typeof parsed?.profileName !== 'string' || !Array.isArray(parsed?.mods)) {
-        return { success: false, error: 'export.r2x do perfil está com formato inválido' }
-      }
-
-      // Real field names (confirmed against r2modmanPlus source): mods[].name is
-      // "Namespace-ModName", version is {major,minor,patch}, enabled defaults to true.
-      const result = parsed.mods
-        .filter((m: any) => m?.enabled === undefined || m.enabled)
-        .map((m: any) => {
-          const parts = String(m.name).split('-')
-          return {
-            namespace: parts[0],
-            name: parts.slice(1).join('-'),
-            version: `${m.version?.major ?? 0}.${m.version?.minor ?? 0}.${m.version?.patch ?? 0}`,
-          }
-        })
-        .filter((m: { namespace: string; name: string }) => m.namespace && m.name)
-
-      // Extract config files from the config/ folder in the ZIP, PRESERVING the subfolder
-      // structure (ex.: config/DistantOrigins/Translations/Mod/Mod.French.yml). Achatar tudo
-      // para BepInEx/config/<nome> criava uma segunda cópia num caminho diferente do que o
-      // próprio mod instala (config/DistantOrigins/...), gerando "Duplicate key ... skipped".
-      // Mantendo o caminho, o config do perfil sobrescreve o padrão do mod — igual ao r2modman.
-      const configs: { filename: string; installPath: string; content: string }[] = []
-      zip.getEntries().forEach((e: any) => {
-        if (e.isDirectory) return
-        const name = String(e.entryName).replace(/\\/g, '/')
-        if (!name.startsWith('config/')) return
-        const rel = name.slice('config/'.length)
-        // Ignora entradas vazias e qualquer tentativa de path traversal.
-        if (!rel || rel.includes('..')) return
-        configs.push({
-          filename: path.posix.basename(rel),
-          installPath: `BepInEx/config/${rel}`,
-          content: zip.readAsText(e),
-        })
+  ipcMain.handle('mods:pickAndImportR2File', async () => {
+    // Importa um perfil exportado do R2ModManager como ARQUIVO (.r2z). O r2z é um ZIP
+    // binário (export.r2x + config/), diferente do .glitnir que é JSON texto — por isso
+    // tem seu próprio picker e lê os bytes crus, sem passar por JSON.parse.
+    try {
+      const result = await dialog.showOpenDialog(win, {
+        title: 'Importar perfil do R2ModManager (.r2z)',
+        filters: [
+          { name: 'Perfil R2ModManager', extensions: ['r2z', 'zip'] },
+          { name: 'Todos os arquivos', extensions: ['*'] },
+        ],
+        properties: ['openFile'],
       })
-
-      return { success: true, mods: result, configs }
+      if (result.canceled || !result.filePaths[0]) return null
+      const zipBuffer = fs.readFileSync(result.filePaths[0])
+      return parseR2ProfileZip(zipBuffer)
     } catch (err: any) {
       return { success: false, error: err.message }
     }
