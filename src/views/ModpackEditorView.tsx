@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
-import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath } from '../utils/modManager'
+import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath, findInlineBinaryConfigs, stripModToReference } from '../utils/modManager'
 import { getAdminModpack, getPublicModpack, publishModpack, uploadPrivateMod, listPrivateMods, uploadConfig } from '../utils/backendApi'
 import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
@@ -561,13 +561,13 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     }])
   }
 
-  /** Constrói o objeto Modpack com o estado atual do draft. */
+  /** Constrói o objeto Modpack com o estado atual do draft (mods só como referência). */
   function buildCurrentModpack(): Modpack {
     return {
       version: packVersion,
       name: packName,
       description: packDescription,
-      mods: modpackMods,
+      mods: modpackMods.map(stripModToReference),
       configs: modpackConfigs,
       battlemetricsId: packBattlemetricsId || undefined,
     }
@@ -626,7 +626,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       setImportError(r2Result.error || 'Formato não reconhecido. Use um código Glitnir (GLITNIR-v1-…) ou R2ModManager.')
       return
     }
-    applyR2Result(r2Result.mods, r2Result.configs)
+    await applyR2Result(r2Result.mods, r2Result.configs)
     setImportCodeInput('')
   }
 
@@ -634,10 +634,14 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
    * Converte o resultado de um perfil R2ModManager (código ou arquivo .r2z) para o
    * estado do editor. Reusado por importação por código e por arquivo .r2z, já que
    * ambos produzem a mesma estrutura { mods, configs } vinda do main process.
+   *
+   * Configs de TEXTO chegam em `content` (embutidos no modpack). Configs BINÁRIOS
+   * (imagem/música/gif/fonte) chegam em `contentBase64` e são enviados ao R2 aqui;
+   * o `content` final vira a URL pública. Requer login de admin para o upload.
    */
-  function applyR2Result(
+  async function applyR2Result(
     mods: { namespace: string; name: string; version: string }[],
-    configs?: { filename: string; installPath: string; content: string }[],
+    configs?: { filename: string; installPath: string; content?: string; contentBase64?: string }[],
   ) {
     const newMods: Mod[] = mods.map(({ namespace, name, version }) => {
       const ts = allMods.find(m => m.owner === namespace && m.name === name)
@@ -651,21 +655,37 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       }
     })
 
-    const newConfigs: ModConfig[] = (configs ?? []).map(({ filename, installPath, content }) => {
-      // Casa o config a um mod pelo nome/namespace presente no filename.
-      const matchedMod = newMods.find(m =>
+    const matchMod = (filename: string) =>
+      newMods.find(m =>
         filename.toLowerCase().includes(m.name.toLowerCase()) ||
         filename.toLowerCase().includes((m.namespace ?? '').toLowerCase())
-      )
-      return { mod: matchedMod?.name ?? '', filename, installPath, content }
-    })
+      )?.name ?? ''
+
+    const newConfigs: ModConfig[] = []
+    let skippedBinaries = 0
+    for (const cfg of configs ?? []) {
+      if (cfg.contentBase64 != null) {
+        // Config binário: sobe pro R2 e guarda a URL. Sem admin logado não dá pra
+        // subir — conta como pulado e avisa no final (mods/text seguem normalmente).
+        if (!adminToken) { skippedBinaries++; continue }
+        try {
+          const { url } = await uploadConfig(adminToken, cfg.filename, cfg.contentBase64, backendUrl)
+          newConfigs.push({ mod: matchMod(cfg.filename), filename: cfg.filename, installPath: cfg.installPath, content: url })
+        } catch {
+          skippedBinaries++
+        }
+      } else {
+        newConfigs.push({ mod: matchMod(cfg.filename), filename: cfg.filename, installPath: cfg.installPath, content: cfg.content ?? '' })
+      }
+    }
 
     setModpackMods(newMods)
     if (newConfigs.length > 0) setModpackConfigs(newConfigs)
     loadedTargets.current.add(target)
     const cfgCount = newConfigs.length
-    setImportSuccess(`✓ ${newMods.length} mod${newMods.length !== 1 ? 's' : ''}${cfgCount ? ` e ${cfgCount} config${cfgCount !== 1 ? 's' : ''}` : ''} importados do R2!`)
-    setTimeout(() => setImportSuccess(''), 3000)
+    const warn = skippedBinaries > 0 ? ` (${skippedBinaries} binário(s) não enviado(s) — faça login de admin)` : ''
+    setImportSuccess(`✓ ${newMods.length} mod${newMods.length !== 1 ? 's' : ''}${cfgCount ? ` e ${cfgCount} config${cfgCount !== 1 ? 's' : ''}` : ''} importados do R2!${warn}`)
+    setTimeout(() => setImportSuccess(''), 4000)
   }
 
   async function handleImportR2File() {
@@ -677,7 +697,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       setImportError(r2Result.error || 'Não foi possível ler o arquivo .r2z.')
       return
     }
-    applyR2Result(r2Result.mods, r2Result.configs)
+    await applyR2Result(r2Result.mods, r2Result.configs)
   }
 
   async function handleImportFile() {
@@ -705,12 +725,34 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setPublishing(true)
     setError('')
     try {
+      // O modpack.json deve carregar só REFERÊNCIAS. Binário de mod nunca é embutido
+      // (mods guardam downloadUrl); mas um config binário pode ter sido embutido inline
+      // por engano (imagem/música vira string gigante e corrompe) — isso é o que estoura
+      // o tamanho no publish. Bloqueia com diagnóstico: cada um deve ir pro R2.
+      const inlineBinary = findInlineBinaryConfigs(modpackConfigs)
+      if (inlineBinary.length > 0) {
+        const total = inlineBinary.reduce((s, c) => s + c.bytes, 0)
+        const top = inlineBinary.slice(0, 8)
+          .map(c => `• ${c.installPath} — ${(c.bytes / 1024 / 1024).toFixed(1)} MB`)
+          .join('\n')
+        const extra = inlineBinary.length > 8 ? `\n…e mais ${inlineBinary.length - 8}` : ''
+        setError(
+          `${inlineBinary.length} config(s) binário(s) estão embutidos no modpack (${(total / 1024 / 1024).toFixed(1)} MB) — ` +
+          `é isso que estoura o publish. Eles precisam ir pro R2: abra "Configs locais", selecione cada um e clique "Enviar ao R2", ` +
+          `depois publique de novo.\n${top}${extra}`,
+        )
+        setPublishing(false)
+        return
+      }
+
+      // Só referências nos mods (remove qualquer campo de runtime/inline).
+      const cleanMods = modpackMods.map(stripModToReference)
       await publishModpack(adminToken, target, {
         version: packVersion,
         name: packName,
         description: packDescription,
         updatedAt: new Date().toISOString(),
-        mods: modpackMods,
+        mods: cleanMods,
         configs: modpackConfigs,
         battlemetricsId: packBattlemetricsId || undefined,
       }, undefined, backendUrl)

@@ -141,8 +141,8 @@ declare global {
         applyConfig: (args: { profile: string; installPath: string; content: string }) => Promise<{ success: boolean; error?: string }>
         readConfigsFromZip: (args: { url: string }) => Promise<{ success: boolean; configs?: { filename: string; installPath: string; content: string }[]; error?: string }>
         pickAndRead: () => Promise<{ filename: string; content: string; size: number } | null>
-        importR2Code: (args: { code: string }) => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content: string }[]; error?: string }>
-        pickAndImportR2File: () => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content: string }[]; error?: string } | null>
+        importR2Code: (args: { code: string }) => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content?: string; contentBase64?: string }[]; error?: string }>
+        pickAndImportR2File: () => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content?: string; contentBase64?: string }[]; error?: string } | null>
         openLog: (args: { valheimPath: string; profile?: string }) => Promise<{ success: boolean; error?: string }>
       }
       game: {

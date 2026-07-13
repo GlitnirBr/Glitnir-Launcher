@@ -29,8 +29,14 @@ function safeName(name?: string): string {
  * version é {major,minor,patch}, enabled default true.
  * Fonte: https://github.com/ebkr/r2modmanPlus
  */
+// Extensões de config binário — espelha BINARY_CONFIG_EXT_RE em src/utils/modManager.ts.
+// Binários (imagem/música/gif/fonte) não podem virar string; são retornados como base64
+// para o editor subir ao R2 em vez de embutir no modpack.
+const R2_BINARY_CONFIG_RE =
+  /\.(png|jpe?g|gif|webp|bmp|ico|tga|dds|mp3|ogg|wav|flac|aac|m4a|mp4|webm|mov|mkv|ttf|otf|woff2?|zip|dll|bin|dat|pdf|unity3d|assetbundle|bundle)$/i
+
 function parseR2ProfileZip(zipBuffer: Buffer):
-  | { success: true; mods: { namespace: string; name: string; version: string }[]; configs: { filename: string; installPath: string; content: string }[] }
+  | { success: true; mods: { namespace: string; name: string; version: string }[]; configs: { filename: string; installPath: string; content?: string; contentBase64?: string }[] }
   | { success: false; error: string } {
   const AdmZip = require('adm-zip')
   let zip: any
@@ -70,18 +76,21 @@ function parseR2ProfileZip(zipBuffer: Buffer):
   // BepInEx/config/<nome> criava uma segunda cópia num caminho diferente do que o
   // próprio mod instala, gerando "Duplicate key ... skipped". Mantendo o caminho, o
   // config do perfil sobrescreve o padrão do mod — igual ao r2modman.
-  const configs: { filename: string; installPath: string; content: string }[] = []
+  const configs: { filename: string; installPath: string; content?: string; contentBase64?: string }[] = []
   zip.getEntries().forEach((e: any) => {
     if (e.isDirectory) return
     const name = String(e.entryName).replace(/\\/g, '/')
     if (!name.startsWith('config/')) return
     const rel = name.slice('config/'.length)
     if (!rel || rel.includes('..')) return
-    configs.push({
-      filename: path.posix.basename(rel),
-      installPath: `BepInEx/config/${rel}`,
-      content: zip.readAsText(e),
-    })
+    const base = { filename: path.posix.basename(rel), installPath: `BepInEx/config/${rel}` }
+    if (R2_BINARY_CONFIG_RE.test(rel)) {
+      // Binário (ex.: música .ogg, gif, spritesheet .png): lê os BYTES crus como base64.
+      // Ler como texto (readAsText) destruiria o arquivo. O editor sobe pro R2.
+      configs.push({ ...base, contentBase64: e.getData().toString('base64') })
+    } else {
+      configs.push({ ...base, content: zip.readAsText(e) })
+    }
   })
 
   return { success: true, mods, configs }
@@ -1090,9 +1099,12 @@ app.whenReady().then(() => {
       // arquivos nunca apareciam no editor. Retornamos caminhos RELATIVOS em estilo posix (/),
       // que o frontend concatena com o dir (readFile/writeFile) e usa como installPath.
       // Texto (editável inline) + binários que alguns mods guardam em config/ (ex.:
-      // spritesheet .png de emoji). Os binários aparecem na lista para o admin poder
-      // enviá-los ao R2; o frontend detecta pelo installPath (isBinaryConfigPath).
-      const CONFIG_RE = /\.(cfg|json|yaml|yml|ini|toml|txt|png|jpe?g|gif|webp|bmp|ico|zip|dll|bin|dat)$/i
+      // spritesheet .png de emoji, músicas .ogg/.mp3, gifs, fontes). Os binários
+      // aparecem na lista para o admin enviá-los ao R2; o frontend detecta pelo
+      // installPath (isBinaryConfigPath). A parte binária espelha BINARY_CONFIG_EXT_RE
+      // em src/utils/modManager.ts — manter em sincronia.
+      const CONFIG_RE =
+        /\.(cfg|json|yaml|yml|ini|toml|txt|png|jpe?g|gif|webp|bmp|ico|tga|dds|mp3|ogg|wav|flac|aac|m4a|mp4|webm|mov|mkv|ttf|otf|woff2?|zip|dll|bin|dat|pdf|unity3d|assetbundle|bundle)$/i
       const files: string[] = []
       const walk = (current: string, rel: string) => {
         for (const name of fs.readdirSync(current)) {
