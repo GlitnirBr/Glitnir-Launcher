@@ -399,7 +399,7 @@ export default function App() {
           headers = resolved.headers
         }
 
-        const dl = await window.glitnir.mods.download({ url, modName: mod.name, headers })
+        const dl = await window.glitnir.mods.download({ url, modName: mod.name, headers, sha256: mod.sha256 })
         if (!dl.success) throw new Error(dl.error || `Falha ao baixar ${mod.name}`)
 
         setInstallStatus(`Instalando ${mod.name}...`)

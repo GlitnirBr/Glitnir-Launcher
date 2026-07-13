@@ -1,13 +1,53 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, session } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import crypto from 'crypto'
 import { spawn } from 'child_process'
 
 const DATA_PATH = path.join(app.getPath('appData'), 'GlitnirLauncher')
 const CONFIG_FILE = path.join(DATA_PATH, 'config.json')
 const PROFILES_ROOT = path.join(DATA_PATH, 'profiles')
+
+/**
+ * Sanitiza um nome (mod/perfil) para uso seguro como UM segmento de caminho.
+ * Remove qualquer separador ou `..`, bloqueando path traversal. Para nomes de mod
+ * legítimos (ex.: "ValheimModding-Jotunn") é no-op, pois só contêm [A-Za-z0-9_-].
+ */
+function safeName(name?: string): string {
+  return (name || 'mod').replace(/[^a-zA-Z0-9_-]/g, '_')
+}
+
+/**
+ * Raízes cujo conteúdo o renderer pode ler/gravar via fs:* — a raiz de perfis mais
+ * qualquer pasta que o usuário tenha escolhido explicitamente num diálogo do SO nesta
+ * sessão. Sem isso, fs:readFile/writeFile aceitariam QUALQUER caminho do disco vindo do
+ * renderer (leitura/escrita arbitrária = RCE se o renderer for comprometido).
+ */
+const allowedFsRoots = new Set<string>()
+
+/**
+ * Registra como raízes liberadas os caminhos que o PRÓPRIO usuário configurou (pasta do Valheim,
+ * pasta de mods). São tão confiáveis quanto uma pasta escolhida em diálogo — só que persistidos no
+ * config.json entre sessões. Sem isso, após reiniciar o launcher o valheimPath vindo do config não
+ * estaria liberado e ações como "Abrir pasta" falhariam.
+ */
+function registerConfiguredRoots(config: any) {
+  for (const p of [config?.valheimPath, config?.modsPath]) {
+    if (typeof p === 'string' && p) allowedFsRoots.add(path.resolve(p))
+  }
+}
+
+/** Um caminho está liberado se cair dentro da raiz de perfis ou de uma pasta escolhida em diálogo. */
+function isPathAllowed(p: string): boolean {
+  const target = path.resolve(p)
+  const roots = [getProfilesRoot(), ...allowedFsRoots]
+  return roots.some(root => {
+    const r = path.resolve(root)
+    return target === r || target.startsWith(r + path.sep)
+  })
+}
 
 /** Procura um arquivo pelo nome recursivamente; retorna o caminho ou null. */
 function findFileInDir(dir: string, filename: string): string | null {
@@ -56,8 +96,7 @@ function listFilesRecursive(dir: string, prefix = ''): string[] {
  * como localizar de outra forma, já que seus nomes não têm relação com o nome do mod.
  */
 function modManifestPath(profileRoot: string, modName: string): string {
-  const safe = (modName || 'mod').replace(/[^a-zA-Z0-9_-]/g, '_')
-  return path.join(profileRoot, '.glitnir', 'installed', `${safe}.json`)
+  return path.join(profileRoot, '.glitnir', 'installed', `${safeName(modName)}.json`)
 }
 
 /** Grava o manifesto de um mod com a lista de arquivos externos (relativos ao perfil). */
@@ -100,8 +139,7 @@ function movePath(src: string, dest: string) {
 
 /** Depósito de um mod desativado dentro do perfil (fora da árvore que o BepInEx varre). */
 function disabledStoreDir(profileRoot: string, modName: string): string {
-  const safe = (modName || 'mod').replace(/[^a-zA-Z0-9_-]/g, '_')
-  return path.join(profileRoot, '.glitnir', 'disabled', safe)
+  return path.join(profileRoot, '.glitnir', 'disabled', safeName(modName))
 }
 
 /**
@@ -112,7 +150,7 @@ function disabledStoreDir(profileRoot: string, modName: string): string {
  */
 function disableModFiles(profileRoot: string, modName: string, version?: string): { moved: boolean; version?: string } {
   const store = disabledStoreDir(profileRoot, modName)
-  const pluginDir = path.join(profileRoot, 'BepInEx', 'plugins', modName)
+  const pluginDir = path.join(profileRoot, 'BepInEx', 'plugins', safeName(modName))
   const hadPlugin = fs.existsSync(pluginDir)
 
   // Arquivos externos (patchers/monomod/core) registrados no manifesto do install.
@@ -127,7 +165,7 @@ function disableModFiles(profileRoot: string, modName: string, version?: string)
   // Zera um depósito antigo (ex.: religar interrompido no meio) antes de reencher.
   if (fs.existsSync(store)) fs.rmSync(store, { recursive: true, force: true })
 
-  if (hadPlugin) movePath(pluginDir, path.join(store, 'plugins', modName))
+  if (hadPlugin) movePath(pluginDir, path.join(store, 'plugins', safeName(modName)))
 
   const bepinex = path.join(profileRoot, 'BepInEx')
   const movedExternal: string[] = []
@@ -162,9 +200,9 @@ function enableModFiles(profileRoot: string, modName: string): { moved: boolean;
   let meta: { version?: string | null; external?: string[] } = {}
   try { meta = JSON.parse(fs.readFileSync(path.join(store, 'meta.json'), 'utf-8')) } catch { /* segue */ }
 
-  const storedPlugin = path.join(store, 'plugins', modName)
+  const storedPlugin = path.join(store, 'plugins', safeName(modName))
   if (fs.existsSync(storedPlugin)) {
-    const dest = path.join(profileRoot, 'BepInEx', 'plugins', modName)
+    const dest = path.join(profileRoot, 'BepInEx', 'plugins', safeName(modName))
     if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true })
     movePath(storedPlugin, dest)
   }
@@ -358,8 +396,7 @@ function getProfilesRoot(): string {
 
 /** Sanitiza o id do modpack para usar como nome de pasta de perfil. */
 function profileDir(profile: string): string {
-  const safe = (profile || 'default').replace(/[^a-zA-Z0-9_-]/g, '_')
-  return path.join(getProfilesRoot(), safe)
+  return path.join(getProfilesRoot(), safeName(profile || 'default'))
 }
 
 function ensureDirs(profile?: string) {
@@ -401,6 +438,7 @@ function loadConfig() {
       modpackBranch: 'main',
     }
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2))
+    registerConfiguredRoots(defaultConfig)
     return defaultConfig
   }
   const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8'))
@@ -408,6 +446,7 @@ function loadConfig() {
     config.valheimPath = autoDetectValheim()
     saveConfig(config)
   }
+  registerConfiguredRoots(config)
   return config
 }
 
@@ -419,6 +458,7 @@ function saveConfig(newValues: object) {
   }
   const merged = { ...current, ...newValues }
   fs.writeFileSync(CONFIG_FILE, JSON.stringify(merged, null, 2))
+  registerConfiguredRoots(merged)
 }
 
 function createWindow() {
@@ -433,18 +473,61 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Sandbox do Chromium: isola o renderer em processo próprio sem acesso ao SO. O preload só
+      // usa contextBridge/ipcRenderer (compatíveis com sandbox), então liga sem quebrar a ponte.
+      sandbox: true,
     },
   })
 
-  const devUrl = 'http://localhost:5173'
-  win.loadURL(devUrl).catch(() => {
+  // Em produção carrega o bundle local diretamente. NUNCA tenta o servidor de dev primeiro:
+  // um processo qualquer escutando em localhost:5173 na máquina do usuário seria carregado
+  // com a ponte IPC (glitnir) anexada. O dev server só é usado em builds não-empacotados.
+  if (app.isPackaged) {
     win.loadFile(path.join(__dirname, '../dist/index.html'))
+  } else {
+    win.loadURL('http://localhost:5173').catch(() => {
+      win.loadFile(path.join(__dirname, '../dist/index.html'))
+    })
+  }
+
+  // Trava de navegação: impede a janela principal de sair da própria origem. Sem isso, se o
+  // renderer fosse induzido a navegar para uma página remota, ela herdaria a ponte glitnir
+  // (fs read/write, game.launch). Links externos legítimos passam por shell.openExternal.
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url !== win.webContents.getURL()) e.preventDefault()
+  })
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+    return { action: 'deny' }
   })
 
   return win
 }
 
 app.whenReady().then(() => {
+  // Content-Security-Policy só em produção (o dev server do Vite usa inline scripts + WS de HMR,
+  // que uma CSP estrita quebraria). Restringe scripts à própria origem e conexões/imagens a HTTPS,
+  // servindo de rede de segurança contra XSS. Ajuste as fontes se o app passar a buscar outros hosts.
+  if (app.isPackaged) {
+    session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+      cb({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Content-Security-Policy': [
+            "default-src 'self'; " +
+            "script-src 'self'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' https: data:; " +
+            "font-src 'self' data:; " +
+            "connect-src 'self' https:; " +
+            "object-src 'none'; " +
+            "frame-src 'none'",
+          ],
+        },
+      })
+    })
+  }
+
   // Corrige instalações antigas com config/ aninhado dentro de plugins/ (duplicatas).
   migrateAllProfiles()
 
@@ -511,6 +594,7 @@ app.whenReady().then(() => {
       properties: ['openDirectory'],
     })
     if (!result.canceled && result.filePaths[0]) {
+      allowedFsRoots.add(path.resolve(result.filePaths[0]))
       return result.filePaths[0]
     }
     return null
@@ -519,15 +603,18 @@ app.whenReady().then(() => {
   ipcMain.handle('mods:install', async (_e, { zipPath, modName, profile }) => {
     try {
       ensureDirs(profile)
+      // Sanitiza o nome do mod: ele vira segmento de caminho (plugins/<mod>) e vem do manifesto.
+      // Sem isso, um nome com `../` gravaria fora do perfil (path traversal).
+      const mod = safeName(modName)
       const ext = path.extname(zipPath).toLowerCase()
-      const modFolder = path.join(profileDir(profile), 'BepInEx', 'plugins', modName)
+      const modFolder = path.join(profileDir(profile), 'BepInEx', 'plugins', mod)
 
       if (ext === '.dll') {
         // DLL: copy directly into the mod's own plugin folder so BepInEx can find it
         fs.mkdirSync(modFolder, { recursive: true })
         fs.copyFileSync(zipPath, path.join(modFolder, path.basename(zipPath)))
         // Sem arquivos em pastas compartilhadas: manifesto vazio (remoção só apaga o plugin).
-        writeModManifest(profileDir(profile), modName, [])
+        writeModManifest(profileDir(profile), mod, [])
       } else {
         // ZIP (default): extract to a staging dir first, then route the package the same
         // way r2modman does — special top-level folders (config/, patchers/, monomod/,
@@ -535,8 +622,7 @@ app.whenReady().then(() => {
         // plugins/<modName>/.
         const AdmZip = require('adm-zip')
         const zip = new AdmZip(zipPath)
-        const safeName = (modName || 'mod').replace(/[^a-zA-Z0-9_-]/g, '_')
-        const staging = path.join(os.tmpdir(), `glitnir-mod-${safeName}-${Date.now()}`)
+        const staging = path.join(os.tmpdir(), `glitnir-mod-${mod}-${Date.now()}`)
         zip.extractAllTo(staging, true)
 
         // Detect BepInExPack: ZIP contains winhttp.dll → promote ALL framework files to profile root.
@@ -549,9 +635,9 @@ app.whenReady().then(() => {
           copyDirRecursive(path.dirname(winhttpInStaging), profileDir(profile))
         } else {
           // Normal Thunderstore mod: route config/ → BepInEx/config/, etc.
-          const external = routeModContents(staging, profileDir(profile), modName)
+          const external = routeModContents(staging, profileDir(profile), mod)
           // Registra os arquivos roteados p/ pastas compartilhadas para o mods:remove limpá-los.
-          writeModManifest(profileDir(profile), modName, external)
+          writeModManifest(profileDir(profile), mod, external)
         }
         fs.rmSync(staging, { recursive: true, force: true })
       }
@@ -563,18 +649,37 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('mods:download', async (_e, { url, modName, headers }) => {
+  ipcMain.handle('mods:download', async (_e, { url, modName, headers, sha256 }: { url: string; modName: string; headers?: Record<string, string>; sha256?: string }) => {
     try {
+      // Só baixa de http/https (bloqueia file:// e outros esquemas vindos do renderer).
+      if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+        return { success: false, error: 'URL de download inválida' }
+      }
       const axios = require('axios')
       const response = await axios.get(url, {
         responseType: 'arraybuffer',
         headers: headers || undefined,
         maxRedirects: 5,
+        timeout: 120000,
+        maxContentLength: 512 * 1024 * 1024, // teto de 512MB contra payloads gigantes
+        maxBodyLength: 512 * 1024 * 1024,
       })
+      const buf = Buffer.from(response.data)
+
+      // Verificação de integridade (defense-in-depth): se o manifesto trouxer um sha256, o
+      // download só é aceito se o hash bater. Protege contra um repositório/mirror adulterado.
+      // Retrocompatível: mods sem sha256 no manifesto seguem sem verificação.
+      if (sha256) {
+        const digest = crypto.createHash('sha256').update(buf).digest('hex')
+        if (digest.toLowerCase() !== String(sha256).toLowerCase()) {
+          return { success: false, error: `Integridade falhou para ${modName}: hash não confere (esperado ${sha256}, obtido ${digest}).` }
+        }
+      }
+
       // Preserve the real file extension so mods:install can detect the file type
       const urlExt = path.extname(url.split('?')[0]).toLowerCase() || '.zip'
-      const tempPath = path.join(os.tmpdir(), `${modName}-${Date.now()}${urlExt}`)
-      fs.writeFileSync(tempPath, Buffer.from(response.data))
+      const tempPath = path.join(os.tmpdir(), `${safeName(modName)}-${Date.now()}${urlExt}`)
+      fs.writeFileSync(tempPath, buf)
       return { success: true, tempPath }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -584,17 +689,20 @@ app.whenReady().then(() => {
   ipcMain.handle('mods:applyConfig', async (_e, { profile, installPath, content }) => {
     try {
       ensureDirs(profile)
-      const base = profileDir(profile)
-      // Impede path traversal para fora do perfil.
+      const base = path.resolve(profileDir(profile))
+      // Impede path traversal para fora do perfil. O separador no prefixo evita que uma pasta
+      // IRMÃ com o mesmo prefixo (ex.: <perfil>_evil) passe no teste.
       const target = path.resolve(base, installPath)
-      if (!target.startsWith(path.resolve(base))) {
+      if (target !== base && !target.startsWith(base + path.sep)) {
         return { success: false, error: 'Caminho de config inválido' }
       }
 
       let finalContent = content
-      if (/^https?:\/\//i.test((content || '').trim())) {
+      const trimmed = (content || '').trim()
+      if (/^https?:\/\//i.test(trimmed)) {
+        // Busca só por http/https e com timeout (o conteúdo pode ser uma URL no manifesto).
         const axios = require('axios')
-        const res = await axios.get(content.trim(), { responseType: 'text' })
+        const res = await axios.get(trimmed, { responseType: 'text', timeout: 30000, maxRedirects: 5 })
         finalContent = typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
       }
 
@@ -645,6 +753,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle('mods:readConfigsFromZip', async (_e, { url }: { url: string }) => {
     try {
+      // Só busca de http/https (bloqueia file:// e outros esquemas locais vindos do renderer),
+      // igual ao mods:download — a url pode vir de dados remotos (manifesto do modpack).
+      if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+        return { success: false, error: 'URL inválida' }
+      }
       const axios = require('axios')
       const AdmZip = require('adm-zip')
       const response = await axios.get(url, {
@@ -716,7 +829,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('mods:remove', (_e, { modName, profile }) => {
     const profileRoot = profileDir(profile)
-    const modPath = path.join(profileRoot, 'BepInEx', 'plugins', modName)
+    const modPath = path.join(profileRoot, 'BepInEx', 'plugins', safeName(modName))
     const existed = fs.existsSync(modPath)
     if (existed) fs.rmSync(modPath, { recursive: true, force: true })
 
@@ -861,7 +974,9 @@ app.whenReady().then(() => {
   })
 
   ipcMain.on('shell:openExternal', (_e, url: string) => {
-    shell.openExternal(url)
+    // Só http/https. Bloqueia file://, protocolos perigosos do Windows etc. — o url pode vir de
+    // dados remotos (links de notícias/modpack), então um esquema malicioso viraria execução.
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url)
   })
 
   // ── Local filesystem helpers (config editor) ──────────────────────────────
@@ -871,12 +986,19 @@ app.whenReady().then(() => {
       title: 'Selecionar pasta BepInEx/config',
     })
     if (result.canceled || result.filePaths.length === 0) return null
+    // A pasta escolhida no diálogo passa a ser uma raiz liberada para fs:read/write/listDir
+    // nesta sessão. Só caminhos dentro de raízes escolhidas explicitamente pelo usuário (ou da
+    // raiz de perfis) podem ser lidos/gravados — o renderer não consegue mais tocar arquivos arbitrários.
+    allowedFsRoots.add(path.resolve(result.filePaths[0]))
     return result.filePaths[0]
   })
 
   ipcMain.handle('fs:openInExplorer', async (_e, { dirPath }: { dirPath: string }) => {
     try {
       if (!dirPath) return { success: false, error: 'Caminho não definido' }
+      // Confina a raízes liberadas (perfis + pastas escolhidas em diálogo). Sem isso, o renderer
+      // poderia criar/abrir pastas arbitrárias no disco via este handler.
+      if (!isPathAllowed(dirPath)) return { success: false, error: 'Acesso negado a esta pasta' }
       if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
       const err = await shell.openPath(dirPath)
       if (err) return { success: false, error: err }
@@ -888,6 +1010,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('fs:listDir', async (_e, { dir }: { dir: string }) => {
     try {
+      if (!isPathAllowed(dir)) return { success: false, error: 'Acesso negado a esta pasta' }
       if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
         return { success: false, error: 'Pasta não encontrada' }
       }
@@ -917,6 +1040,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('fs:readFile', async (_e, { filePath }: { filePath: string }) => {
     try {
+      if (!isPathAllowed(filePath)) return { success: false, error: 'Acesso negado a este arquivo' }
       const content = fs.readFileSync(filePath, 'utf-8')
       return { success: true, content }
     } catch (err: any) {
@@ -926,6 +1050,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('fs:writeFile', async (_e, { filePath, content }: { filePath: string; content: string }) => {
     try {
+      if (!isPathAllowed(filePath)) return { success: false, error: 'Acesso negado a este arquivo' }
       fs.writeFileSync(filePath, content, 'utf-8')
       return { success: true }
     } catch (err: any) {

@@ -34,6 +34,8 @@ export interface Mod {
    * Para privados é um caminho relativo resolvido pelo backend (ex: /mods/private/Foo.zip).
    */
   downloadUrl: string
+  /** Hash SHA-256 (hex) do arquivo baixado. Quando presente, o download é verificado. Opcional. */
+  sha256?: string
   description?: string
   /** Se true, o jogador pode escolher não instalar esse mod (ver ModsView). */
   optional?: boolean
@@ -132,7 +134,7 @@ declare global {
         defaultPath: () => Promise<string>
         install: (args: { zipPath: string; modName: string; profile: string }) => Promise<{ success: boolean; error?: string }>
         bepinexOk: (args: { profile: string }) => Promise<boolean>
-        download: (args: { url: string; modName: string; headers?: Record<string, string> }) => Promise<{ success: boolean; tempPath?: string; error?: string }>
+        download: (args: { url: string; modName: string; headers?: Record<string, string>; sha256?: string }) => Promise<{ success: boolean; tempPath?: string; error?: string }>
         list: (profile: string) => Promise<string[]>
         remove: (args: { modName: string; profile: string }) => Promise<{ success: boolean; error?: string }>
         setOptionalEnabled: (args: { profile: string; modName: string; enabled: boolean; version?: string }) => Promise<{ success: boolean; moved?: boolean; version?: string; error?: string }>
