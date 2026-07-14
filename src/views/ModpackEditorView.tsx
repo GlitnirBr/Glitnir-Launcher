@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
 import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath, findInlineBinaryConfigs, stripModToReference } from '../utils/modManager'
-import { getAdminModpack, getPublicModpack, publishModpack, uploadPrivateMod, listPrivateMods, uploadConfig } from '../utils/backendApi'
+import { getAdminModpack, getPublicModpack, publishModpack, listPrivateMods, uploadConfig } from '../utils/backendApi'
 import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
 
@@ -56,8 +56,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [repoMods, setRepoMods] = useState<PrivateModEntry[]>([])
   const [repoLoading, setRepoLoading] = useState(false)
   const [repoError, setRepoError] = useState('')
-  const [pendingFile, setPendingFile] = useState<{ filename: string; content: string; size: number } | null>(null)
+  const [pendingFile, setPendingFile] = useState<{ token: string; filename: string; size: number } | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadError, setUploadError] = useState('')
 
   const [cfgMod, setCfgMod] = useState('')
@@ -339,13 +340,13 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   }, [adminToken, backendUrl])
 
   async function handlePickFile() {
-    const w = window as any
-    if (!w?.glitnir?.mods?.pickAndRead) return
-    const file = await w.glitnir.mods.pickAndRead()
+    if (!window.glitnir?.mods?.pickModFile) return
+    // Escolhe o arquivo SEM lê-lo (mods de 300MB+ não passam por IPC como base64).
+    // Recebe só um token opaco + metadados; o upload streama do main direto pro Worker.
+    const file = await window.glitnir.mods.pickModFile()
     if (!file) return
     setPendingFile(file)
     setUploadError('')
-    // Auto-fill name from filename (strip extension)
     if (!privName.trim()) {
       setPrivName(file.filename.replace(/\.(zip|dll)$/i, ''))
     }
@@ -356,17 +357,25 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     if (!pendingFile || !adminToken) return
     setUploading(true)
     setUploadError('')
+    setUploadProgress(0)
+    // Progresso vindo do main (upload multipart via Worker → R2).
+    window.glitnir.mods.onUploadProgress(({ sent, total }) => {
+      setUploadProgress(total > 0 ? Math.round((sent / total) * 100) : 0)
+    })
     try {
-      await uploadPrivateMod(adminToken, pendingFile.filename, pendingFile.content, backendUrl)
-      // Add to modpack with the name filled in
-      const name = privName.trim() || pendingFile.filename.replace(/\.(zip|dll)$/i, '')
+      const res = await window.glitnir.mods.uploadPrivateModStream({
+        token: pendingFile.token,
+        backendUrl: backendUrl || '',
+        authToken: adminToken,
+      })
+      if (!res.success || !res.filename) throw new Error(res.error || 'Falha no upload')
+      const name = privName.trim() || res.filename.replace(/\.(zip|dll)$/i, '')
       setModpackMods(prev => [...prev, {
         name,
         source: 'private',
-        filename: pendingFile.filename,
-        downloadUrl: `/mods/private/${pendingFile.filename}`,
+        filename: res.filename!,
+        downloadUrl: res.downloadUrl || `/mods/private/${res.filename}`,
       }])
-      // Refresh repo list and reset form
       setPendingFile(null)
       setPrivName('')
       setPrivFilename('')
@@ -374,7 +383,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     } catch (err: any) {
       setUploadError(err?.message || 'Erro ao fazer upload')
     } finally {
+      window.glitnir.mods.offUploadProgress()
       setUploading(false)
+      setUploadProgress(0)
     }
   }
 
@@ -1239,7 +1250,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                   {pendingFile && (
                     <span className="priv-file-preview">
                       <strong>{pendingFile.filename}</strong>
-                      <span className="text-muted"> ({(pendingFile.size / 1024).toFixed(0)} KB)</span>
+                      <span className="text-muted"> ({pendingFile.size >= 1024 * 1024
+                        ? `${(pendingFile.size / 1024 / 1024).toFixed(1)} MB`
+                        : `${(pendingFile.size / 1024).toFixed(0)} KB`})</span>
                     </span>
                   )}
                 </div>
@@ -1258,11 +1271,18 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                       onClick={handleUploadAndAdd}
                       disabled={uploading || !privName.trim()}
                     >
-                      {uploading ? 'Enviando...' : '↑ Upload e Adicionar'}
+                      {uploading ? `Enviando... ${uploadProgress}%` : '↑ Upload e Adicionar'}
                     </button>
-                    <button className="btn-ghost" onClick={() => { setPendingFile(null); setPrivName(''); setPrivFilename('') }}>
-                      ✕
-                    </button>
+                    {!uploading && (
+                      <button className="btn-ghost" onClick={() => { setPendingFile(null); setPrivName(''); setPrivFilename('') }}>
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                )}
+                {uploading && (
+                  <div style={{ height: 4, background: 'var(--border-color)', borderRadius: 2, marginTop: 8, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${uploadProgress}%`, background: 'var(--accent-green)', transition: 'width 0.2s' }} />
                   </div>
                 )}
                 {uploadError && <p className="text-error" style={{ marginTop: 8, fontSize: 12 }}>{uploadError}</p>}

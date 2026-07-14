@@ -10,6 +10,15 @@ const DATA_PATH = path.join(app.getPath('appData'), 'GlitnirLauncher')
 const CONFIG_FILE = path.join(DATA_PATH, 'config.json')
 const PROFILES_ROOT = path.join(DATA_PATH, 'profiles')
 
+// Tamanho da parte do upload multipart de mod. R2 exige partes uniformes (exceto a
+// última) e ≥5MB; o limite de body por request do Worker é ~100MB. 25MiB fica folgado.
+const MOD_UPLOAD_PART_SIZE = 25 * 1024 * 1024
+
+// Arquivos de mod escolhidos no diálogo, por token opaco. O renderer recebe só o token
+// (não o caminho absoluto), então não consegue mandar o app subir um arquivo arbitrário
+// do disco — só o que o admin escolheu no diálogo do SO. Ver mods:pickModFile/uploadPrivateModStream.
+const pickedModFiles = new Map<string, string>()
+
 /**
  * Sanitiza um nome (mod/perfil) para uso seguro como UM segmento de caminho.
  * Remove qualquer separador ou `..`, bloqueando path traversal. Para nomes de mod
@@ -760,6 +769,87 @@ app.whenReady().then(() => {
       return { success: true, tempPath }
     } catch (err: any) {
       return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('mods:pickModFile', async () => {
+    // Escolhe o arquivo do mod SEM lê-lo (mods grandes não cabem via IPC). Guarda o
+    // caminho num token opaco e devolve só metadados — o upload usa o token.
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Selecione o arquivo do mod (.zip / .dll)',
+      filters: [{ name: 'Arquivos de Mod', extensions: ['zip', 'dll'] }],
+      properties: ['openFile'],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const filePath = result.filePaths[0]
+    let size: number
+    try { size = fs.statSync(filePath).size } catch { return null }
+    const token = crypto.randomUUID()
+    pickedModFiles.set(token, filePath)
+    return { token, filename: path.basename(filePath), size }
+  })
+
+  ipcMain.handle('mods:uploadPrivateModStream', async (
+    _e,
+    { token, backendUrl, authToken }: { token: string; backendUrl: string; authToken: string },
+  ) => {
+    // Sobe o mod pro R2 SEMPRE via Worker (multipart), em partes de 25MiB. O app não
+    // fala com o R2 direto — cada parte vai autenticada pro Worker, que repassa ao R2.
+    // Funciona pra mods de qualquer tamanho (300MB+). Emite progresso em mods:uploadProgress.
+    const filePath = pickedModFiles.get(token)
+    if (!filePath) return { success: false, error: 'Arquivo não encontrado (selecione de novo)' }
+    if (typeof backendUrl !== 'string' || !/^https?:\/\//i.test(backendUrl)) {
+      return { success: false, error: 'Backend inválido' }
+    }
+    const base = backendUrl.replace(/\/+$/, '')
+    const filename = path.basename(filePath)
+    if (!/^[^/\\]+\.(dll|zip)$/i.test(filename)) {
+      return { success: false, error: 'Apenas .dll e .zip são permitidos' }
+    }
+    const axios = require('axios')
+    const auth = { Authorization: `Bearer ${authToken}` }
+    let uploadId = ''
+    let fd: number | null = null
+    try {
+      const total = fs.statSync(filePath).size
+
+      const created = await axios.post(`${base}/mods/private/multipart/create`, { filename }, { headers: auth, timeout: 30000 })
+      uploadId = created.data?.uploadId
+      if (!uploadId) throw new Error('Backend não devolveu uploadId')
+
+      fd = fs.openSync(filePath, 'r')
+      const parts: { partNumber: number; etag: string }[] = []
+      const buffer = Buffer.allocUnsafe(MOD_UPLOAD_PART_SIZE)
+      let position = 0
+      let partNumber = 0
+      while (position < total) {
+        const bytesRead = fs.readSync(fd, buffer, 0, MOD_UPLOAD_PART_SIZE, position)
+        if (bytesRead <= 0) break
+        partNumber++
+        const chunk = buffer.subarray(0, bytesRead)
+        const q = `filename=${encodeURIComponent(filename)}&uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`
+        const res = await axios.put(`${base}/mods/private/multipart/part?${q}`, chunk, {
+          headers: { ...auth, 'Content-Type': 'application/octet-stream' },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+          timeout: 300000,
+        })
+        parts.push({ partNumber, etag: res.data.etag })
+        position += bytesRead
+        try { win.webContents.send('mods:uploadProgress', { filename, sent: position, total }) } catch { /* janela pode ter fechado */ }
+      }
+
+      await axios.post(`${base}/mods/private/multipart/complete`, { filename, uploadId, parts }, { headers: auth, timeout: 60000 })
+      uploadId = '' // completado — não abortar no finally
+      return { success: true, filename, downloadUrl: `/mods/private/${filename}` }
+    } catch (err: any) {
+      if (uploadId) {
+        try { await axios.post(`${base}/mods/private/multipart/abort`, { filename, uploadId }, { headers: auth, timeout: 15000 }) } catch { /* best-effort */ }
+      }
+      return { success: false, error: err?.response?.data?.error || err?.message || 'Falha no upload' }
+    } finally {
+      if (fd !== null) { try { fs.closeSync(fd) } catch { /* ignore */ } }
+      pickedModFiles.delete(token)
     }
   })
 

@@ -141,6 +141,10 @@ declare global {
         applyConfig: (args: { profile: string; installPath: string; content: string }) => Promise<{ success: boolean; error?: string }>
         readConfigsFromZip: (args: { url: string }) => Promise<{ success: boolean; configs?: { filename: string; installPath: string; content: string }[]; error?: string }>
         pickAndRead: () => Promise<{ filename: string; content: string; size: number } | null>
+        pickModFile: () => Promise<{ token: string; filename: string; size: number } | null>
+        uploadPrivateModStream: (args: { token: string; backendUrl: string; authToken: string }) => Promise<{ success: boolean; filename?: string; downloadUrl?: string; error?: string }>
+        onUploadProgress: (callback: (data: { filename: string; sent: number; total: number }) => void) => void
+        offUploadProgress: () => void
         importR2Code: (args: { code: string }) => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content?: string; contentBase64?: string }[]; error?: string }>
         pickAndImportR2File: () => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content?: string; contentBase64?: string }[]; error?: string } | null>
         openLog: (args: { valheimPath: string; profile?: string }) => Promise<{ success: boolean; error?: string }>

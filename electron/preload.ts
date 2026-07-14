@@ -39,6 +39,16 @@ contextBridge.exposeInMainWorld('glitnir', {
       ipcRenderer.invoke('mods:readConfigsFromZip', args),
     pickAndRead: () =>
       ipcRenderer.invoke('mods:pickAndRead'),
+    pickModFile: () =>
+      ipcRenderer.invoke('mods:pickModFile'),
+    uploadPrivateModStream: (args: { token: string; backendUrl: string; authToken: string }) =>
+      ipcRenderer.invoke('mods:uploadPrivateModStream', args),
+    onUploadProgress: (callback: (data: { filename: string; sent: number; total: number }) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, data: { filename: string; sent: number; total: number }) => callback(data)
+      ipcRenderer.removeAllListeners('mods:uploadProgress')
+      ipcRenderer.on('mods:uploadProgress', handler)
+    },
+    offUploadProgress: () => ipcRenderer.removeAllListeners('mods:uploadProgress'),
     importR2Code: (args: { code: string }) =>
       ipcRenderer.invoke('mods:importR2Code', args),
     pickAndImportR2File: () =>
