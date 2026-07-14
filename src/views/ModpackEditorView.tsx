@@ -73,6 +73,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [publishing, setPublishing] = useState(false)
+  // installPaths dos configs binários inline que o publish NÃO conseguiu subir pro R2
+  // (arquivo não achado no disco). Quando setado, o banner de erro oferece removê-los.
+  const [unresolvedBinaries, setUnresolvedBinaries] = useState<string[]>([])
 
   // ── Import / Export state ────────────────────────────────────────────────
   const [showImportExport, setShowImportExport] = useState(false)
@@ -728,52 +731,103 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     }
   }
 
-  async function handlePublish() {
+  /** Publica o modpack a partir da lista de configs dada (já com URLs, sem inline binário). */
+  async function pushModpack(configs: ModConfig[]) {
+    // Só referências nos mods (remove qualquer campo de runtime/inline).
+    const cleanMods = modpackMods.map(stripModToReference)
+    await publishModpack(adminToken!, target, {
+      version: packVersion,
+      name: packName,
+      description: packDescription,
+      updatedAt: new Date().toISOString(),
+      mods: cleanMods,
+      configs,
+      battlemetricsId: packBattlemetricsId || undefined,
+    }, undefined, backendUrl)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2500)
+  }
+
+  /**
+   * Fluxo de publish. O modpack.json deve carregar só REFERÊNCIAS; um config binário
+   * embutido inline (content não é URL — imagem/música virou string gigante e corrompe)
+   * é o que estoura o tamanho. Antes de publicar, AUTO-RESOLVE cada um: lê o arquivo real
+   * do diretório de configs local e sobe pro R2, trocando o content pela URL pública.
+   * Só bloqueia os que não deram pra achar no disco — e aí o banner oferece removê-los.
+   */
+  async function runPublish(configsInput: ModConfig[]) {
     if (!adminToken) {
       setError('Sessão de admin expirada. Faça login novamente.')
       return
     }
     setPublishing(true)
     setError('')
+    setUnresolvedBinaries([])
     try {
-      // O modpack.json deve carregar só REFERÊNCIAS. Binário de mod nunca é embutido
-      // (mods guardam downloadUrl); mas um config binário pode ter sido embutido inline
-      // por engano (imagem/música vira string gigante e corrompe) — isso é o que estoura
-      // o tamanho no publish. Bloqueia com diagnóstico: cada um deve ir pro R2.
-      const inlineBinary = findInlineBinaryConfigs(modpackConfigs)
+      let configs = configsInput
+      const inlineBinary = findInlineBinaryConfigs(configs)
       if (inlineBinary.length > 0) {
-        const total = inlineBinary.reduce((s, c) => s + c.bytes, 0)
-        const top = inlineBinary.slice(0, 8)
-          .map(c => `• ${c.installPath} — ${(c.bytes / 1024 / 1024).toFixed(1)} MB`)
-          .join('\n')
-        const extra = inlineBinary.length > 8 ? `\n…e mais ${inlineBinary.length - 8}` : ''
-        setError(
-          `${inlineBinary.length} config(s) binário(s) estão embutidos no modpack (${(total / 1024 / 1024).toFixed(1)} MB) — ` +
-          `é isso que estoura o publish. Eles precisam ir pro R2: abra "Configs locais", selecione cada um e clique "Enviar ao R2", ` +
-          `depois publique de novo.\n${top}${extra}`,
-        )
-        setPublishing(false)
-        return
+        const dir = localConfigDir.trim()
+        const resolved = new Map<string, string>() // installPath -> URL pública no R2
+        const unresolved: { installPath: string; reason: string }[] = []
+        for (const c of inlineBinary) {
+          // installPath = BepInEx/config/<rel>; o arquivo local mora em <configDir>/<rel>.
+          const rel = c.installPath.replace(/^BepInEx[\\/]config[\\/]/, '')
+          if (!dir) {
+            unresolved.push({ installPath: c.installPath, reason: 'nenhuma pasta de configs local definida' })
+            continue
+          }
+          try {
+            const read = await window.glitnir.fs.readFileBase64({ filePath: localFilePath(rel) })
+            if (!read.success || !read.content) {
+              unresolved.push({ installPath: c.installPath, reason: read.error || 'arquivo não encontrado no disco' })
+              continue
+            }
+            const { url } = await uploadConfig(adminToken, rel, read.content, backendUrl)
+            resolved.set(c.installPath, url)
+          } catch (err: any) {
+            unresolved.push({ installPath: c.installPath, reason: err.message || 'falha ao enviar ao R2' })
+          }
+        }
+        if (resolved.size > 0) {
+          configs = configs.map(c => resolved.has(c.installPath) ? { ...c, content: resolved.get(c.installPath)! } : c)
+          setModpackConfigs(configs)
+        }
+        if (unresolved.length > 0) {
+          setUnresolvedBinaries(unresolved.map(u => u.installPath))
+          const top = unresolved.slice(0, 8).map(u => `• ${u.installPath} — ${u.reason}`).join('\n')
+          const extra = unresolved.length > 8 ? `\n…e mais ${unresolved.length - 8}` : ''
+          const okMsg = resolved.size > 0 ? `\n(${resolved.size} config(s) já foram enviados ao R2 com sucesso.)` : ''
+          const hint = dir
+            ? `\nConfira se a pasta de configs local aponta pro perfil certo, ou remova estes configs.`
+            : `\nDefina a pasta de configs local (aba "Configs locais") e tente de novo, ou remova estes configs.`
+          setError(
+            `${unresolved.length} config(s) binário(s) não puderam ir pro R2 automaticamente:\n${top}${extra}${okMsg}${hint}`,
+          )
+          setPublishing(false)
+          return
+        }
       }
 
-      // Só referências nos mods (remove qualquer campo de runtime/inline).
-      const cleanMods = modpackMods.map(stripModToReference)
-      await publishModpack(adminToken, target, {
-        version: packVersion,
-        name: packName,
-        description: packDescription,
-        updatedAt: new Date().toISOString(),
-        mods: cleanMods,
-        configs: modpackConfigs,
-        battlemetricsId: packBattlemetricsId || undefined,
-      }, undefined, backendUrl)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2500)
+      await pushModpack(configs)
     } catch (err: any) {
       setError(err.message)
     } finally {
       setPublishing(false)
     }
+  }
+
+  function handlePublish() {
+    void runPublish(modpackConfigs)
+  }
+
+  /** Remove os configs binários que não puderam ir pro R2 e publica sem eles. */
+  function handleDropUnresolvedAndPublish() {
+    const drop = new Set(unresolvedBinaries)
+    const next = modpackConfigs.filter(c => !drop.has(c.installPath))
+    setModpackConfigs(next)
+    setUnresolvedBinaries([])
+    void runPublish(next)
   }
 
   const visibleMods = filteredMods.slice(0, visibleCount)
@@ -786,7 +840,23 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         <p className="text-secondary">Navegue mods do Thunderstore e monte seu modpack.</p>
       </div>
 
-      {error && <div className="error-banner">{error}</div>}
+      {error && (
+        <div className="error-banner" style={{ whiteSpace: 'pre-line' }}>
+          {error}
+          {unresolvedBinaries.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <button
+                className="btn-secondary"
+                style={{ fontSize: 13 }}
+                onClick={handleDropUnresolvedAndPublish}
+                disabled={publishing}
+              >
+                Remover {unresolvedBinaries.length} config(s) e publicar mesmo assim
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="admin-tabs">
