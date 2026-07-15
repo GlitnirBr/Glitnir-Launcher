@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
-import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath, findInlineBinaryConfigs, stripModToReference } from '../utils/modManager'
+import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath, byteLength, stripModToReference } from '../utils/modManager'
 import { getAdminModpack, getPublicModpack, publishModpack, listPrivateMods, uploadConfig } from '../utils/backendApi'
 import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
@@ -83,6 +83,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [importCodeInput, setImportCodeInput] = useState('')
   const [importError, setImportError] = useState('')
   const [importSuccess, setImportSuccess] = useState('')
+  // Qual import está rodando ('' = nenhum). Dá feedback visual e trava os botões durante o
+  // trabalho (resolver código no Thunderstore / subir binários ao R2 pode levar segundos).
+  const [importing, setImporting] = useState<'' | 'code' | 'file' | 'r2'>('')
   const [codeCopied, setCodeCopied] = useState(false)
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -549,7 +552,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       try {
         const read = await window.glitnir.fs.readFileBase64({ filePath: localFilePath(localSelectedFile) })
         if (!read.success || !read.content) throw new Error(read.error || 'Falha ao ler o arquivo')
-        const { url } = await uploadConfig(adminToken, localSelectedFile, read.content, backendUrl)
+        // Basename: o backend exige nome simples (sem `/`) na key do R2. O installPath
+        // preserva a subpasta pra o player gravar no lugar certo.
+        const { url } = await uploadConfig(adminToken, configBasename(localSelectedFile), read.content, backendUrl)
         // Substitui uma entrada existente com o mesmo installPath (ex.: corrigir um
         // binário antes corrompido) em vez de só pular.
         setModpackConfigs(prev => {
@@ -617,31 +622,35 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setImportSuccess('')
     const raw = importCodeInput.trim()
     if (!raw) return
-
-    // ── Formato Glitnir ──────────────────────────────────────────────────────
-    if (raw.startsWith('GLITNIR-v1-')) {
-      try {
-        const data = JSON.parse(decodeURIComponent(atob(raw.slice('GLITNIR-v1-'.length)))) as Modpack
-        if (!data.mods) throw new Error('campo "mods" ausente')
-        applyImportedModpack(data)
-        setImportCodeInput('')
-        const cfgCount = data.configs?.length ?? 0
-        setImportSuccess(`✓ ${data.mods.length} mod${data.mods.length !== 1 ? 's' : ''}${cfgCount ? ` e ${cfgCount} config${cfgCount !== 1 ? 's' : ''}` : ''} importados!`)
-        setTimeout(() => setImportSuccess(''), 3000)
-      } catch (err: any) {
-        setImportError('Código Glitnir inválido: ' + (err.message || ''))
+    setImporting('code')
+    try {
+      // ── Formato Glitnir ──────────────────────────────────────────────────────
+      if (raw.startsWith('GLITNIR-v1-')) {
+        try {
+          const data = JSON.parse(decodeURIComponent(atob(raw.slice('GLITNIR-v1-'.length)))) as Modpack
+          if (!data.mods) throw new Error('campo "mods" ausente')
+          applyImportedModpack(data)
+          setImportCodeInput('')
+          const cfgCount = data.configs?.length ?? 0
+          setImportSuccess(`✓ ${data.mods.length} mod${data.mods.length !== 1 ? 's' : ''}${cfgCount ? ` e ${cfgCount} config${cfgCount !== 1 ? 's' : ''}` : ''} importados!`)
+          setTimeout(() => setImportSuccess(''), 3000)
+        } catch (err: any) {
+          setImportError('Código Glitnir inválido: ' + (err.message || ''))
+        }
+        return
       }
-      return
-    }
 
-    // ── Formato R2ModManager (código curto resolvido via API do Thunderstore) ──
-    const r2Result = await window.glitnir.mods.importR2Code({ code: raw })
-    if (!r2Result.success || !r2Result.mods) {
-      setImportError(r2Result.error || 'Formato não reconhecido. Use um código Glitnir (GLITNIR-v1-…) ou R2ModManager.')
-      return
+      // ── Formato R2ModManager (código curto resolvido via API do Thunderstore) ──
+      const r2Result = await window.glitnir.mods.importR2Code({ code: raw })
+      if (!r2Result.success || !r2Result.mods) {
+        setImportError(r2Result.error || 'Formato não reconhecido. Use um código Glitnir (GLITNIR-v1-…) ou R2ModManager.')
+        return
+      }
+      await applyR2Result(r2Result.mods, r2Result.configs)
+      setImportCodeInput('')
+    } finally {
+      setImporting('')
     }
-    await applyR2Result(r2Result.mods, r2Result.configs)
-    setImportCodeInput('')
   }
 
   /**
@@ -707,11 +716,17 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setImportSuccess('')
     const r2Result = await window.glitnir.mods.pickAndImportR2File()
     if (!r2Result) return // usuário cancelou o diálogo
-    if (!r2Result.success || !r2Result.mods) {
-      setImportError(r2Result.error || 'Não foi possível ler o arquivo .r2z.')
-      return
+    // O spinner só liga DEPOIS do diálogo do OS (durante ele o usuário já vê a janela nativa).
+    setImporting('r2')
+    try {
+      if (!r2Result.success || !r2Result.mods) {
+        setImportError(r2Result.error || 'Não foi possível ler o arquivo .r2z.')
+        return
+      }
+      await applyR2Result(r2Result.mods, r2Result.configs)
+    } finally {
+      setImporting('')
     }
-    await applyR2Result(r2Result.mods, r2Result.configs)
   }
 
   async function handleImportFile() {
@@ -719,6 +734,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setImportSuccess('')
     const text = await window.glitnir.fs.pickJsonFile()
     if (!text) return
+    setImporting('file')
     try {
       const data = JSON.parse(text) as Modpack
       if (!data.mods) throw new Error('campo "mods" ausente')
@@ -728,32 +744,51 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       setTimeout(() => setImportSuccess(''), 3000)
     } catch (err: any) {
       setImportError('Arquivo inválido: ' + (err.message || 'falha ao ler'))
+    } finally {
+      setImporting('')
     }
   }
 
-  /** Publica o modpack a partir da lista de configs dada (já com URLs, sem inline binário). */
-  async function pushModpack(configs: ModConfig[]) {
-    // Só referências nos mods (remove qualquer campo de runtime/inline).
-    const cleanMods = modpackMods.map(stripModToReference)
-    await publishModpack(adminToken!, target, {
+  /** Monta o objeto Modpack publicável (mods só como referência) a partir dos configs dados. */
+  function buildPublishPayload(configs: ModConfig[]): Modpack {
+    return {
       version: packVersion,
       name: packName,
       description: packDescription,
       updatedAt: new Date().toISOString(),
-      mods: cleanMods,
+      mods: modpackMods.map(stripModToReference),
       configs,
       battlemetricsId: packBattlemetricsId || undefined,
-    }, undefined, backendUrl)
+    }
+  }
+
+  /** Publica o modpack a partir da lista de configs dada (já enxuta, só metadados + URLs). */
+  async function pushModpack(configs: ModConfig[]) {
+    await publishModpack(adminToken!, target, buildPublishPayload(configs), undefined, backendUrl)
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
   }
 
+  const isUrlContent = (c: ModConfig) => /^https?:\/\//i.test((c.content || '').trim())
+  /** Basename do installPath — o backend exige nome simples (sem `/`) na key do R2. */
+  const configBasename = (installPath: string) => installPath.split(/[\\/]/).pop() || installPath
+  /** Base64 dos BYTES UTF-8 de um texto (o backend faz atob→bytes; texto = bytes UTF-8). */
+  function base64Utf8(s: string): string {
+    const bytes = new TextEncoder().encode(s)
+    let bin = ''
+    const CHUNK = 0x8000
+    for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+    return btoa(bin)
+  }
+
   /**
-   * Fluxo de publish. O modpack.json deve carregar só REFERÊNCIAS; um config binário
-   * embutido inline (content não é URL — imagem/música virou string gigante e corrompe)
-   * é o que estoura o tamanho. Antes de publicar, AUTO-RESOLVE cada um: lê o arquivo real
-   * do diretório de configs local e sobe pro R2, trocando o content pela URL pública.
-   * Só bloqueia os que não deram pra achar no disco — e aí o banner oferece removê-los.
+   * Fluxo de publish. O modpack.json tem limite de 5 MB no backend e deve carregar só
+   * metadados + URLs — conteúdo pesado vai pro R2:
+   *   • BINÁRIO embutido (content não-URL): os bytes inline estão corrompidos (foram lidos
+   *     como UTF-8), então precisa reler o arquivo real do disco (pasta de configs local).
+   *     Se não achar no disco, vira pendência e o banner oferece remover.
+   *   • TEXTO grande: o content inline é válido, então sobe direto pro R2 (sem disco), do
+   *     maior pro menor, até o JSON caber no orçamento.
    */
   async function runPublish(configsInput: ModConfig[]) {
     if (!adminToken) {
@@ -765,48 +800,71 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setUnresolvedBinaries([])
     try {
       let configs = configsInput
-      const inlineBinary = findInlineBinaryConfigs(configs)
-      if (inlineBinary.length > 0) {
-        const dir = localConfigDir.trim()
-        const resolved = new Map<string, string>() // installPath -> URL pública no R2
-        const unresolved: { installPath: string; reason: string }[] = []
-        for (const c of inlineBinary) {
-          // installPath = BepInEx/config/<rel>; o arquivo local mora em <configDir>/<rel>.
-          const rel = c.installPath.replace(/^BepInEx[\\/]config[\\/]/, '')
-          if (!dir) {
-            unresolved.push({ installPath: c.installPath, reason: 'nenhuma pasta de configs local definida' })
+      const unresolved: { installPath: string; reason: string }[] = []
+
+      // 1. Binários embutidos → R2 lendo o arquivo REAL do disco (o inline está corrompido).
+      const dir = localConfigDir.trim()
+      const inlineBinaries = configs.filter(c => !isUrlContent(c) && isBinaryConfigPath(c.installPath))
+      for (const c of inlineBinaries) {
+        if (!dir) {
+          unresolved.push({ installPath: c.installPath, reason: 'binário sem pasta de configs local definida' })
+          continue
+        }
+        const rel = c.installPath.replace(/^BepInEx[\\/]config[\\/]/, '')
+        try {
+          const read = await window.glitnir.fs.readFileBase64({ filePath: localFilePath(rel) })
+          if (!read.success || !read.content) {
+            unresolved.push({ installPath: c.installPath, reason: read.error || 'arquivo não encontrado no disco' })
             continue
           }
-          try {
-            const read = await window.glitnir.fs.readFileBase64({ filePath: localFilePath(rel) })
-            if (!read.success || !read.content) {
-              unresolved.push({ installPath: c.installPath, reason: read.error || 'arquivo não encontrado no disco' })
-              continue
-            }
-            const { url } = await uploadConfig(adminToken, rel, read.content, backendUrl)
-            resolved.set(c.installPath, url)
-          } catch (err: any) {
-            unresolved.push({ installPath: c.installPath, reason: err.message || 'falha ao enviar ao R2' })
-          }
+          const { url } = await uploadConfig(adminToken, configBasename(c.installPath), read.content, backendUrl)
+          configs = configs.map(x => x.installPath === c.installPath ? { ...x, content: url } : x)
+        } catch (err: any) {
+          unresolved.push({ installPath: c.installPath, reason: err.message || 'falha ao enviar ao R2' })
         }
-        if (resolved.size > 0) {
-          configs = configs.map(c => resolved.has(c.installPath) ? { ...c, content: resolved.get(c.installPath)! } : c)
-          setModpackConfigs(configs)
+      }
+
+      // 2. Texto grande → R2 (a partir do content inline, válido), do maior pro menor,
+      //    até o modpack.json caber no orçamento (< 5 MB do backend, com folga).
+      const MAX_PUBLISH_BYTES = 4.5 * 1024 * 1024
+      const payloadBytes = (cs: ModConfig[]) => byteLength(JSON.stringify(buildPublishPayload(cs)))
+      while (payloadBytes(configs) > MAX_PUBLISH_BYTES) {
+        const heaviest = configs
+          .filter(c => !isUrlContent(c) && !isBinaryConfigPath(c.installPath))
+          .sort((a, b) => byteLength(b.content) - byteLength(a.content))[0]
+        if (!heaviest) break // nada mais de texto pra offload
+        try {
+          const { url } = await uploadConfig(adminToken, configBasename(heaviest.installPath), base64Utf8(heaviest.content || ''), backendUrl)
+          configs = configs.map(x => x.installPath === heaviest.installPath ? { ...x, content: url } : x)
+        } catch (err: any) {
+          unresolved.push({ installPath: heaviest.installPath, reason: 'falha ao subir texto ao R2: ' + (err.message || '') })
+          break // evita loop infinito
         }
-        if (unresolved.length > 0) {
-          setUnresolvedBinaries(unresolved.map(u => u.installPath))
-          const top = unresolved.slice(0, 8).map(u => `• ${u.installPath} — ${u.reason}`).join('\n')
-          const extra = unresolved.length > 8 ? `\n…e mais ${unresolved.length - 8}` : ''
-          const okMsg = resolved.size > 0 ? `\n(${resolved.size} config(s) já foram enviados ao R2 com sucesso.)` : ''
-          const hint = dir
-            ? `\nConfira se a pasta de configs local aponta pro perfil certo, ou remova estes configs.`
-            : `\nDefina a pasta de configs local (aba "Configs locais") e tente de novo, ou remova estes configs.`
-          setError(
-            `${unresolved.length} config(s) binário(s) não puderam ir pro R2 automaticamente:\n${top}${extra}${okMsg}${hint}`,
-          )
-          setPublishing(false)
-          return
-        }
+      }
+
+      // Persiste as URLs resolvidas no editor (mesmo que ainda reste pendência).
+      setModpackConfigs(configs)
+
+      if (unresolved.length > 0) {
+        setUnresolvedBinaries(unresolved.map(u => u.installPath))
+        const top = unresolved.slice(0, 8).map(u => `• ${u.installPath} — ${u.reason}`).join('\n')
+        const extra = unresolved.length > 8 ? `\n…e mais ${unresolved.length - 8}` : ''
+        const hint = dir
+          ? `\nConfira se a pasta de configs local aponta pro perfil certo, ou remova estes configs.`
+          : `\nDefina a pasta de configs local (aba "Configs locais") pra enviar os binários, ou remova estes configs.`
+        setError(`${unresolved.length} config(s) não puderam ir pro R2:\n${top}${extra}${hint}`)
+        setPublishing(false)
+        return
+      }
+
+      const finalBytes = payloadBytes(configs)
+      if (finalBytes > MAX_PUBLISH_BYTES) {
+        setError(
+          `O modpack ainda está grande demais (${(finalBytes / 1024 / 1024).toFixed(1)} MB) mesmo após enviar os ` +
+          `configs pesados ao R2 — o peso restante é de metadados/mods. Reduza o conteúdo do modpack.`,
+        )
+        setPublishing(false)
+        return
       }
 
       await pushModpack(configs)
@@ -1198,19 +1256,32 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                     />
                     <button
                       className="btn-secondary"
-                      style={{ fontSize: 13, marginTop: 6 }}
+                      style={{ fontSize: 13, marginTop: 6, display: 'inline-flex', alignItems: 'center', gap: 8 }}
                       onClick={handleImportCode}
-                      disabled={!importCodeInput.trim()}
+                      disabled={!importCodeInput.trim() || !!importing}
                     >
-                      Importar por código
+                      {importing === 'code' && <span className="ts-loading-spinner" style={{ width: 13, height: 13, borderWidth: 2 }} />}
+                      {importing === 'code' ? 'Importando…' : 'Importar por código'}
                     </button>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2 }}>
-                    <button className="btn-ghost" style={{ fontSize: 13 }} onClick={handleImportFile}>
-                      Importar arquivo (.glitnir / .json)
+                    <button
+                      className="btn-ghost"
+                      style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                      onClick={handleImportFile}
+                      disabled={!!importing}
+                    >
+                      {importing === 'file' && <span className="ts-loading-spinner" style={{ width: 13, height: 13, borderWidth: 2 }} />}
+                      {importing === 'file' ? 'Importando…' : 'Importar arquivo (.glitnir / .json)'}
                     </button>
-                    <button className="btn-ghost" style={{ fontSize: 13 }} onClick={handleImportR2File}>
-                      Importar perfil do R2ModManager (.r2z)
+                    <button
+                      className="btn-ghost"
+                      style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                      onClick={handleImportR2File}
+                      disabled={!!importing}
+                    >
+                      {importing === 'r2' && <span className="ts-loading-spinner" style={{ width: 13, height: 13, borderWidth: 2 }} />}
+                      {importing === 'r2' ? 'Importando…' : 'Importar perfil do R2ModManager (.r2z)'}
                     </button>
                   </div>
                 </div>
