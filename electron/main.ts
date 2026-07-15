@@ -502,6 +502,57 @@ function ensureDirs(profile?: string) {
   })
 }
 
+// ── Aplicação de configs (incremental) ─────────────────────────────────────────────
+// O modpack pode ter milhares de configs (texto inline + centenas de URLs do R2). Aplicar
+// todos a cada launch reescreve/rebaixa tudo sem necessidade — lento e desnecessário. Guardamos
+// um registro por perfil (installPath -> hash do conteúdo) e só (re)aplicamos o que mudou ou
+// sumiu do disco. Assim, um relaunch sem mudanças pula tudo instantaneamente.
+
+/** djb2 estável de um único config (installPath + content) — marcador do que já foi aplicado. */
+function hashConfigEntry(installPath: string, content: string): string {
+  const s = `${installPath} ${content || ''}`
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return String(h >>> 0)
+}
+
+/** Resolve o alvo de um config dentro do perfil, bloqueando path traversal. null se inválido. */
+function resolveConfigTarget(profile: string, installPath: string): string | null {
+  const base = path.resolve(profileDir(profile))
+  // Separador no prefixo evita que uma pasta IRMÃ com o mesmo prefixo (ex.: <perfil>_evil) passe.
+  const target = path.resolve(base, installPath)
+  if (target !== base && !target.startsWith(base + path.sep)) return null
+  return target
+}
+
+/**
+ * Grava um config no disco. Se `content` for URL http(s) (binário/texto grande offloaded pro R2),
+ * baixa os BYTES crus e grava (preserva binário E texto); senão escreve a string inline.
+ */
+async function writeConfigToDisk(target: string, content: string): Promise<void> {
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  const trimmed = (content || '').trim()
+  if (/^https?:\/\//i.test(trimmed)) {
+    const axios = require('axios')
+    const res = await axios.get(trimmed, { responseType: 'arraybuffer', timeout: 30000, maxRedirects: 5 })
+    fs.writeFileSync(target, Buffer.from(res.data))
+  } else {
+    fs.writeFileSync(target, content)
+  }
+}
+
+const appliedConfigsFile = (profile: string) => path.join(profileDir(profile), '.glitnir', 'applied-configs.json')
+
+function readAppliedConfigs(profile: string): Record<string, string> {
+  try { return JSON.parse(fs.readFileSync(appliedConfigsFile(profile), 'utf-8')) } catch { return {} }
+}
+
+function writeAppliedConfigs(profile: string, rec: Record<string, string>) {
+  const f = appliedConfigsFile(profile)
+  fs.mkdirSync(path.dirname(f), { recursive: true })
+  fs.writeFileSync(f, JSON.stringify(rec))
+}
+
 function autoDetectValheim(): string {
   const possiblePaths = [
     'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Valheim',
@@ -862,29 +913,72 @@ app.whenReady().then(() => {
   ipcMain.handle('mods:applyConfig', async (_e, { profile, installPath, content }) => {
     try {
       ensureDirs(profile)
-      const base = path.resolve(profileDir(profile))
-      // Impede path traversal para fora do perfil. O separador no prefixo evita que uma pasta
-      // IRMÃ com o mesmo prefixo (ex.: <perfil>_evil) passe no teste.
-      const target = path.resolve(base, installPath)
-      if (target !== base && !target.startsWith(base + path.sep)) {
-        return { success: false, error: 'Caminho de config inválido' }
-      }
-
-      fs.mkdirSync(path.dirname(target), { recursive: true })
-
-      const trimmed = (content || '').trim()
-      if (/^https?:\/\//i.test(trimmed)) {
-        // Config referenciado por URL (usado para binários — ex.: spritesheet .png —
-        // que não cabem como string no modpack.json). Baixa como arraybuffer e grava
-        // os BYTES crus: preserva binário E texto (bytes UTF-8 de um .cfg saem iguais).
-        // http/https-only + timeout (a URL vem de dados remotos do manifesto).
-        const axios = require('axios')
-        const res = await axios.get(trimmed, { responseType: 'arraybuffer', timeout: 30000, maxRedirects: 5 })
-        fs.writeFileSync(target, Buffer.from(res.data))
-      } else {
-        fs.writeFileSync(target, content)
-      }
+      const target = resolveConfigTarget(profile, installPath)
+      if (!target) return { success: false, error: 'Caminho de config inválido' }
+      await writeConfigToDisk(target, content)
       return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // Aplica TODOS os configs do modpack de uma vez, de forma INCREMENTAL: pula os que não
+  // mudaram (hash) e cujo arquivo ainda existe no disco. Substitui o loop de N chamadas
+  // mods:applyConfig no renderer (N round-trips de IPC + N downloads do R2 a cada launch).
+  // Num relaunch sem mudanças, pula tudo instantaneamente — nada é reescrito nem rebaixado.
+  ipcMain.handle('mods:applyConfigs', async (
+    _e,
+    { profile, configs }: { profile: string; configs: { installPath: string; content: string; filename?: string }[] },
+  ) => {
+    try {
+      ensureDirs(profile)
+      const list = Array.isArray(configs) ? configs : []
+      const total = list.length
+      const applied = readAppliedConfigs(profile)
+      const wanted = new Set<string>()
+      let done = 0, appliedCount = 0, skipped = 0
+      const failed: string[] = []
+
+      // Separa o que precisa aplicar (hash mudou OU arquivo sumiu — auto-cura remoções manuais)
+      // do que pode ser pulado. Já contabiliza os pulados no progresso.
+      const pending: { installPath: string; content: string; filename?: string; hash: string; target: string }[] = []
+      for (const c of list) {
+        wanted.add(c.installPath)
+        const target = resolveConfigTarget(profile, c.installPath)
+        if (!target) { failed.push(c.installPath); done++; continue }
+        const hash = hashConfigEntry(c.installPath, c.content)
+        if (applied[c.installPath] === hash && fs.existsSync(target)) {
+          skipped++; done++; continue
+        }
+        pending.push({ installPath: c.installPath, content: c.content, filename: c.filename, hash, target })
+      }
+      try { win.webContents.send('mods:applyConfigProgress', { done, total, filename: '' }) } catch { /* janela fechou */ }
+
+      // Aplica os pendentes com concorrência limitada — os downloads do R2 em paralelo aceleram
+      // muito o primeiro apply (centenas de URLs). Grava o registro a cada 25 para ser resiliente
+      // a interrupção (fechar o launcher no meio não obriga a refazer tudo no próximo launch).
+      let idx = 0, sinceSave = 0
+      async function worker() {
+        while (idx < pending.length) {
+          const p = pending[idx++]
+          try {
+            await writeConfigToDisk(p.target, p.content)
+            applied[p.installPath] = p.hash
+            appliedCount++
+          } catch { failed.push(p.installPath) }
+          done++; sinceSave++
+          if (sinceSave >= 25) { sinceSave = 0; try { writeAppliedConfigs(profile, applied) } catch { /* segue */ } }
+          try { win.webContents.send('mods:applyConfigProgress', { done, total, filename: p.filename || p.installPath }) } catch { /* janela fechou */ }
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(8, pending.length) }, worker))
+
+      // Remove do registro os configs que não estão mais no modpack (mantém o arquivo no disco,
+      // como o r2modman — só deixa de rastreá-los).
+      for (const k of Object.keys(applied)) if (!wanted.has(k)) delete applied[k]
+      writeAppliedConfigs(profile, applied)
+
+      return { success: true, total, applied: appliedCount, skipped, failed: failed.length }
     } catch (err: any) {
       return { success: false, error: err.message }
     }

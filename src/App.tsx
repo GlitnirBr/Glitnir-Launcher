@@ -411,17 +411,19 @@ export default function App() {
         if (!inst.success) throw new Error(inst.error || `Falha ao instalar ${mod.name}`)
       }
 
-      // Aplica as configs do modpack.
+      // Aplica as configs do modpack de forma INCREMENTAL, numa única IPC. O main pula os
+      // configs cujo conteúdo não mudou E cujo arquivo já existe no disco, então um relaunch
+      // sem mudanças não reescreve nada nem rebaixa os configs do R2 (o modpack tem milhares).
       const configs = modpackData.configs || []
-      for (let i = 0; i < configs.length; i++) {
-        const cfg = configs[i]
-        setInstallStatus(`Aplicando config ${cfg.filename}...`)
-        setInstallProgress(90 + Math.round((i / Math.max(configs.length, 1)) * 10))
-        await window.glitnir.mods.applyConfig({
-          profile,
-          installPath: cfg.installPath,
-          content: cfg.content,
-        })
+      window.glitnir.mods.onApplyConfigProgress(({ done, total }) => {
+        setInstallStatus(`Aplicando configs (${done}/${total})...`)
+        setInstallProgress(90 + Math.round((done / Math.max(total, 1)) * 10))
+      })
+      try {
+        const r = await window.glitnir.mods.applyConfigs({ profile, configs })
+        if (r?.error) throw new Error(r.error)
+      } finally {
+        window.glitnir.mods.offApplyConfigProgress()
       }
 
       // Registra os mods instalados desse perfil + o hash dos configs aplicados, para

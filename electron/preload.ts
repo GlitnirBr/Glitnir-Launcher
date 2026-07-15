@@ -35,6 +35,14 @@ contextBridge.exposeInMainWorld('glitnir', {
       ipcRenderer.invoke('mods:setOptionalEnabled', args),
     applyConfig: (args: { profile: string; installPath: string; content: string }) =>
       ipcRenderer.invoke('mods:applyConfig', args),
+    applyConfigs: (args: { profile: string; configs: { installPath: string; content: string; filename?: string }[] }) =>
+      ipcRenderer.invoke('mods:applyConfigs', args),
+    onApplyConfigProgress: (callback: (data: { done: number; total: number; filename: string }) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, data: { done: number; total: number; filename: string }) => callback(data)
+      ipcRenderer.removeAllListeners('mods:applyConfigProgress')
+      ipcRenderer.on('mods:applyConfigProgress', handler)
+    },
+    offApplyConfigProgress: () => ipcRenderer.removeAllListeners('mods:applyConfigProgress'),
     readConfigsFromZip: (args: { url: string }) =>
       ipcRenderer.invoke('mods:readConfigsFromZip', args),
     pickAndRead: () =>

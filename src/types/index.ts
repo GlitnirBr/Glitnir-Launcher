@@ -139,6 +139,9 @@ declare global {
         remove: (args: { modName: string; profile: string }) => Promise<{ success: boolean; error?: string }>
         setOptionalEnabled: (args: { profile: string; modName: string; enabled: boolean; version?: string }) => Promise<{ success: boolean; moved?: boolean; version?: string; error?: string }>
         applyConfig: (args: { profile: string; installPath: string; content: string }) => Promise<{ success: boolean; error?: string }>
+        applyConfigs: (args: { profile: string; configs: { installPath: string; content: string; filename?: string }[] }) => Promise<{ success: boolean; total?: number; applied?: number; skipped?: number; failed?: number; error?: string }>
+        onApplyConfigProgress: (callback: (data: { done: number; total: number; filename: string }) => void) => void
+        offApplyConfigProgress: () => void
         readConfigsFromZip: (args: { url: string }) => Promise<{ success: boolean; configs?: { filename: string; installPath: string; content: string }[]; error?: string }>
         pickAndRead: () => Promise<{ filename: string; content: string; size: number } | null>
         pickModFile: () => Promise<{ token: string; filename: string; size: number } | null>
