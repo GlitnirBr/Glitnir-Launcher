@@ -92,6 +92,10 @@ function parseR2ProfileZip(zipBuffer: Buffer):
     if (!name.startsWith('config/')) return
     const rel = name.slice('config/'.length)
     if (!rel || rel.includes('..')) return
+    // Pula backups/lixo que alguns mods geram em config/ (ex.: ExpandWorld salva
+    // expand_rooms_2026-06-21.yaml.bak). Não são config de verdade, incham o modpack e
+    // têm extensão que o R2 não aceita — não devem entrar no pacote.
+    if (/\.(bak|old|orig|tmp|swp|disabled)$|~$/i.test(rel)) return
     const base = { filename: path.posix.basename(rel), installPath: `BepInEx/config/${rel}` }
     if (R2_BINARY_CONFIG_RE.test(rel)) {
       // Binário (ex.: música .ogg, gif, spritesheet .png): lê os BYTES crus como base64.

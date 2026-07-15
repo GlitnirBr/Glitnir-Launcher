@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
-import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath, byteLength, stripModToReference } from '../utils/modManager'
+import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath, isTextConfigPath, byteLength, stripModToReference } from '../utils/modManager'
 import { getAdminModpack, getPublicModpack, publishModpack, listPrivateMods, uploadConfig } from '../utils/backendApi'
 import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
@@ -828,17 +828,25 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       //    até o modpack.json caber no orçamento (< 5 MB do backend, com folga).
       const MAX_PUBLISH_BYTES = 4.5 * 1024 * 1024
       const payloadBytes = (cs: ModConfig[]) => byteLength(JSON.stringify(buildPublishPayload(cs)))
+      const skip = new Set<string>() // installPaths já tentados sem sucesso (evita loop)
       while (payloadBytes(configs) > MAX_PUBLISH_BYTES) {
         const heaviest = configs
-          .filter(c => !isUrlContent(c) && !isBinaryConfigPath(c.installPath))
+          .filter(c => !isUrlContent(c) && !isBinaryConfigPath(c.installPath) && !skip.has(c.installPath))
           .sort((a, b) => byteLength(b.content) - byteLength(a.content))[0]
-        if (!heaviest) break // nada mais de texto pra offload
+        if (!heaviest) break // nada mais que dê pra offload
+        // Extensão desconhecida (ex.: backup .bak): não é binário conhecido nem texto
+        // reconhecido → o R2 rejeita e não cabe embutido. Vira pendência pra remover.
+        if (!isTextConfigPath(heaviest.installPath)) {
+          unresolved.push({ installPath: heaviest.installPath, reason: 'extensão não suportada no R2 e grande demais pra embutir — remova este config' })
+          skip.add(heaviest.installPath)
+          continue
+        }
         try {
           const { url } = await uploadConfig(adminToken, configBasename(heaviest.installPath), base64Utf8(heaviest.content || ''), backendUrl)
           configs = configs.map(x => x.installPath === heaviest.installPath ? { ...x, content: url } : x)
         } catch (err: any) {
           unresolved.push({ installPath: heaviest.installPath, reason: 'falha ao subir texto ao R2: ' + (err.message || '') })
-          break // evita loop infinito
+          skip.add(heaviest.installPath)
         }
       }
 
@@ -849,9 +857,12 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         setUnresolvedBinaries(unresolved.map(u => u.installPath))
         const top = unresolved.slice(0, 8).map(u => `• ${u.installPath} — ${u.reason}`).join('\n')
         const extra = unresolved.length > 8 ? `\n…e mais ${unresolved.length - 8}` : ''
-        const hint = dir
-          ? `\nConfira se a pasta de configs local aponta pro perfil certo, ou remova estes configs.`
-          : `\nDefina a pasta de configs local (aba "Configs locais") pra enviar os binários, ou remova estes configs.`
+        // Binário precisa da pasta local (reler bytes do disco); os demais (extensão não
+        // suportada, ex.: backup .bak) são pra remover — o botão abaixo faz isso.
+        const hasBinaryPending = unresolved.some(u => isBinaryConfigPath(u.installPath))
+        const hint = hasBinaryPending && !dir
+          ? `\nDefina a pasta de configs local (aba "Configs locais") pra enviar os binários, ou remova estes configs.`
+          : `\nUse o botão abaixo pra removê-los e publicar (backups e afins não precisam ir no modpack).`
         setError(`${unresolved.length} config(s) não puderam ir pro R2:\n${top}${extra}${hint}`)
         setPublishing(false)
         return
