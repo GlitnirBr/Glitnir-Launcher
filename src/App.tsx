@@ -466,7 +466,15 @@ export default function App() {
         // dentro de handleInstallMods, que só rodava quando havia mod pendente).
         const configsChanged =
           (config.configsHashByProfile?.[selectedModpack] ?? '') !== hashConfigs(modpackData?.configs)
-        if (!bepinexOk || hasPending || configsChanged) {
+        // Mod órfão = admin REMOVEU um mod do modpack (sem adicionar/atualizar outro nem mexer
+        // em config). Sem este check o gate não dispararia — nenhum mod ativo fica pendente e o
+        // config não muda —, então o handleInstallMods (que apaga os órfãos) nunca rodava e o
+        // jogo continuava carregando o mod removido do perfil. Espelha o mesmo cálculo de `stale`
+        // feito lá dentro (installedByProfile vs. mods ativos atuais).
+        const currentActive = new Set(mods.filter(m => !m.optionalDisabled).map(m => m.name))
+        const hasStale = (config.installedByProfile?.[selectedModpack] || [])
+          .some(m => !currentActive.has(m.name))
+        if (!bepinexOk || hasPending || configsChanged || hasStale) {
           await handleInstallMods()
         }
       }

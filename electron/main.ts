@@ -700,8 +700,9 @@ app.whenReady().then(() => {
       const ext = path.extname(zipPath).toLowerCase()
       const modFolder = path.join(profileDir(profile), 'BepInEx', 'plugins', mod)
 
-      if (ext === '.dll') {
-        // DLL: copy directly into the mod's own plugin folder so BepInEx can find it
+      if (ext === '.dll' || ext === '.mdb') {
+        // DLL (ou .mdb, símbolos de debug Mono que acompanham a dll): copia direto na pasta
+        // de plugin do mod para o BepInEx achar. O .mdb precisa ficar ao lado da sua dll.
         fs.mkdirSync(modFolder, { recursive: true })
         fs.copyFileSync(zipPath, path.join(modFolder, path.basename(zipPath)))
         // Sem arquivos em pastas compartilhadas: manifesto vazio (remoção só apaga o plugin).
@@ -781,8 +782,8 @@ app.whenReady().then(() => {
     // Escolhe o arquivo do mod SEM lê-lo (mods grandes não cabem via IPC). Guarda o
     // caminho num token opaco e devolve só metadados — o upload usa o token.
     const result = await dialog.showOpenDialog(win, {
-      title: 'Selecione o arquivo do mod (.zip / .dll)',
-      filters: [{ name: 'Arquivos de Mod', extensions: ['zip', 'dll'] }],
+      title: 'Selecione o arquivo do mod (.zip / .dll / .mdb)',
+      filters: [{ name: 'Arquivos de Mod', extensions: ['zip', 'dll', 'mdb'] }],
       properties: ['openFile'],
     })
     if (result.canceled || !result.filePaths[0]) return null
@@ -808,8 +809,8 @@ app.whenReady().then(() => {
     }
     const base = backendUrl.replace(/\/+$/, '')
     const filename = path.basename(filePath)
-    if (!/^[^/\\]+\.(dll|zip)$/i.test(filename)) {
-      return { success: false, error: 'Apenas .dll e .zip são permitidos' }
+    if (!/^[^/\\]+\.(dll|zip|mdb)$/i.test(filename)) {
+      return { success: false, error: 'Apenas .dll, .zip e .mdb são permitidos' }
     }
     const axios = require('axios')
     const auth = { Authorization: `Bearer ${authToken}` }

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
 import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath, isTextConfigPath, byteLength, stripModToReference } from '../utils/modManager'
-import { getAdminModpack, getPublicModpack, publishModpack, listPrivateMods, uploadConfig } from '../utils/backendApi'
+import { getAdminModpack, getPublicModpack, publishModpack, listPrivateMods, uploadConfig, DEFAULT_BACKEND_URL } from '../utils/backendApi'
 import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
 
@@ -356,7 +356,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setPendingFile(file)
     setUploadError('')
     if (!privName.trim()) {
-      setPrivName(file.filename.replace(/\.(zip|dll)$/i, ''))
+      setPrivName(file.filename.replace(/\.(zip|dll|mdb)$/i, ''))
     }
     setPrivFilename(file.filename)
   }
@@ -371,13 +371,16 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       setUploadProgress(total > 0 ? Math.round((sent / total) * 100) : 0)
     })
     try {
+      // O main process não conhece o DEFAULT_BACKEND_URL (fallback só do cliente) e rejeita
+      // URL vazia com "Backend inválido". Resolve aqui pro default quando o config está vazio,
+      // igual ao base() usado no resto das chamadas de backend.
       const res = await window.glitnir.mods.uploadPrivateModStream({
         token: pendingFile.token,
-        backendUrl: backendUrl || '',
+        backendUrl: (backendUrl || '').trim() || DEFAULT_BACKEND_URL,
         authToken: adminToken,
       })
       if (!res.success || !res.filename) throw new Error(res.error || 'Falha no upload')
-      const name = privName.trim() || res.filename.replace(/\.(zip|dll)$/i, '')
+      const name = privName.trim() || res.filename.replace(/\.(zip|dll|mdb)$/i, '')
       setModpackMods(prev => [...prev, {
         name,
         source: 'private',
@@ -398,7 +401,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   }
 
   function handleAddFromRepo(entry: PrivateModEntry) {
-    const name = entry.filename.replace(/\.(zip|dll)$/i, '')
+    const name = entry.filename.replace(/\.(zip|dll|mdb)$/i, '')
     if (modpackMods.some(m => m.source === 'private' && m.filename === entry.filename)) return
     setModpackMods(prev => [...prev, {
       name,
@@ -1464,7 +1467,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                       <polyline points="17,8 12,3 7,8"/>
                       <line x1="12" y1="3" x2="12" y2="15"/>
                     </svg>
-                    Selecionar arquivo (.zip / .dll)
+                    Selecionar arquivo (.zip / .dll / .mdb)
                   </button>
                   {pendingFile && (
                     <span className="priv-file-preview">
