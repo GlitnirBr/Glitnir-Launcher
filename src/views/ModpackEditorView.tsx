@@ -76,6 +76,8 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   // installPaths dos configs binários inline que o publish NÃO conseguiu subir pro R2
   // (arquivo não achado no disco). Quando setado, o banner de erro oferece removê-los.
   const [unresolvedBinaries, setUnresolvedBinaries] = useState<string[]>([])
+  // Progresso REAL do publish: total = uploads planejados (binário + texto) + 1 (publish final).
+  const [publishProgress, setPublishProgress] = useState<{ done: number; total: number; label: string } | null>(null)
 
   // ── Import / Export state ────────────────────────────────────────────────
   const [showImportExport, setShowImportExport] = useState(false)
@@ -554,7 +556,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         if (!read.success || !read.content) throw new Error(read.error || 'Falha ao ler o arquivo')
         // Basename: o backend exige nome simples (sem `/`) na key do R2. O installPath
         // preserva a subpasta pra o player gravar no lugar certo.
-        const { url } = await uploadConfig(adminToken, configBasename(localSelectedFile), read.content, backendUrl)
+        const { url } = await uploadConfig(adminToken, configUploadName(localSelectedFile), read.content, backendUrl)
         // Substitui uma entrada existente com o mesmo installPath (ex.: corrigir um
         // binário antes corrompido) em vez de só pular.
         setModpackConfigs(prev => {
@@ -692,7 +694,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         // subir — conta como pulado e avisa no final (mods/text seguem normalmente).
         if (!adminToken) { skippedBinaries++; continue }
         try {
-          const { url } = await uploadConfig(adminToken, cfg.filename, cfg.contentBase64, backendUrl)
+          const { url } = await uploadConfig(adminToken, configUploadName(cfg.installPath), cfg.contentBase64, backendUrl)
           newConfigs.push({ mod: matchMod(cfg.filename), filename: cfg.filename, installPath: cfg.installPath, content: url })
         } catch {
           skippedBinaries++
@@ -771,7 +773,15 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
 
   const isUrlContent = (c: ModConfig) => /^https?:\/\//i.test((c.content || '').trim())
   /** Basename do installPath — o backend exige nome simples (sem `/`) na key do R2. */
-  const configBasename = (installPath: string) => installPath.split(/[\\/]/).pop() || installPath
+  /**
+   * Nome de arquivo pra key do R2. O backend exige `^[A-Za-z0-9._-]+\.ext$` (sem `/`, sem
+   * espaço, sem acento). Pega o basename e troca qualquer caractere inválido por `_` — ex.:
+   * "None resquicio default.yml" → "None_resquicio_default.yml". O installPath original
+   * (com espaço/subpasta) é preservado no config pra o player gravar no lugar certo; a key
+   * é content-addressed (hash8-nome), então o nome "limpo" não precisa bater com o original.
+   */
+  const configUploadName = (installPath: string) =>
+    (installPath.split(/[\\/]/).pop() || installPath).replace(/[^A-Za-z0-9._-]+/g, '_')
   /** Base64 dos BYTES UTF-8 de um texto (o backend faz atob→bytes; texto = bytes UTF-8). */
   function base64Utf8(s: string): string {
     const bytes = new TextEncoder().encode(s)
@@ -801,33 +811,60 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     try {
       let configs = configsInput
       const unresolved: { installPath: string; reason: string }[] = []
+      const dir = localConfigDir.trim()
+      const MAX_PUBLISH_BYTES = 4.5 * 1024 * 1024
+      const payloadBytes = (cs: ModConfig[]) => byteLength(JSON.stringify(buildPublishPayload(cs)))
+      const baseName = (ip: string) => ip.split(/[\\/]/).pop() || ip
+
+      const inlineBinaries = configs.filter(c => !isUrlContent(c) && isBinaryConfigPath(c.installPath))
+
+      // ── Plano de trabalho (pra barra de progresso REAL) ──────────────────────────
+      // Simula o offload ANTES de começar pra saber quantos uploads vão rolar. O content
+      // pesado vira um link curto, então usamos uma URL placeholder do tamanho de uma real.
+      const URL_PLACEHOLDER = `${backendUrl || 'https://glitnir.example'}/configs/00000000-placeholder-name.bin`
+      const plannedBinaries = dir ? inlineBinaries.map(c => c.installPath) : []
+      let sim = configs.map(c => plannedBinaries.includes(c.installPath) ? { ...c, content: URL_PLACEHOLDER } : c)
+      const simSkip = new Set<string>()
+      let plannedTextCount = 0
+      while (payloadBytes(sim) > MAX_PUBLISH_BYTES) {
+        const h = sim
+          .filter(c => !isUrlContent(c) && !isBinaryConfigPath(c.installPath) && !simSkip.has(c.installPath))
+          .sort((a, b) => byteLength(b.content) - byteLength(a.content))[0]
+        if (!h) break
+        if (!isTextConfigPath(h.installPath)) { simSkip.add(h.installPath); continue }
+        plannedTextCount++
+        sim = sim.map(x => x.installPath === h.installPath ? { ...x, content: URL_PLACEHOLDER } : x)
+      }
+
+      const total = plannedBinaries.length + plannedTextCount + 1 // +1 = publish final
+      let done = 0
+      const tick = (label: string) => setPublishProgress({ done, total, label })
+      tick('Preparando publicação…')
 
       // 1. Binários embutidos → R2 lendo o arquivo REAL do disco (o inline está corrompido).
-      const dir = localConfigDir.trim()
-      const inlineBinaries = configs.filter(c => !isUrlContent(c) && isBinaryConfigPath(c.installPath))
       for (const c of inlineBinaries) {
         if (!dir) {
           unresolved.push({ installPath: c.installPath, reason: 'binário sem pasta de configs local definida' })
           continue
         }
+        tick(`Enviando ${baseName(c.installPath)} ao R2…`)
         const rel = c.installPath.replace(/^BepInEx[\\/]config[\\/]/, '')
         try {
           const read = await window.glitnir.fs.readFileBase64({ filePath: localFilePath(rel) })
           if (!read.success || !read.content) {
             unresolved.push({ installPath: c.installPath, reason: read.error || 'arquivo não encontrado no disco' })
-            continue
+          } else {
+            const { url } = await uploadConfig(adminToken, configUploadName(c.installPath), read.content, backendUrl)
+            configs = configs.map(x => x.installPath === c.installPath ? { ...x, content: url } : x)
           }
-          const { url } = await uploadConfig(adminToken, configBasename(c.installPath), read.content, backendUrl)
-          configs = configs.map(x => x.installPath === c.installPath ? { ...x, content: url } : x)
         } catch (err: any) {
           unresolved.push({ installPath: c.installPath, reason: err.message || 'falha ao enviar ao R2' })
         }
+        done = Math.min(done + 1, total - 1)
       }
 
       // 2. Texto grande → R2 (a partir do content inline, válido), do maior pro menor,
       //    até o modpack.json caber no orçamento (< 5 MB do backend, com folga).
-      const MAX_PUBLISH_BYTES = 4.5 * 1024 * 1024
-      const payloadBytes = (cs: ModConfig[]) => byteLength(JSON.stringify(buildPublishPayload(cs)))
       const skip = new Set<string>() // installPaths já tentados sem sucesso (evita loop)
       while (payloadBytes(configs) > MAX_PUBLISH_BYTES) {
         const heaviest = configs
@@ -841,13 +878,15 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
           skip.add(heaviest.installPath)
           continue
         }
+        tick(`Enviando ${baseName(heaviest.installPath)} ao R2…`)
         try {
-          const { url } = await uploadConfig(adminToken, configBasename(heaviest.installPath), base64Utf8(heaviest.content || ''), backendUrl)
+          const { url } = await uploadConfig(adminToken, configUploadName(heaviest.installPath), base64Utf8(heaviest.content || ''), backendUrl)
           configs = configs.map(x => x.installPath === heaviest.installPath ? { ...x, content: url } : x)
         } catch (err: any) {
           unresolved.push({ installPath: heaviest.installPath, reason: 'falha ao subir texto ao R2: ' + (err.message || '') })
           skip.add(heaviest.installPath)
         }
+        done = Math.min(done + 1, total - 1)
       }
 
       // Persiste as URLs resolvidas no editor (mesmo que ainda reste pendência).
@@ -864,6 +903,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
           ? `\nDefina a pasta de configs local (aba "Configs locais") pra enviar os binários, ou remova estes configs.`
           : `\nUse o botão abaixo pra removê-los e publicar (backups e afins não precisam ir no modpack).`
         setError(`${unresolved.length} config(s) não puderam ir pro R2:\n${top}${extra}${hint}`)
+        setPublishProgress(null)
         setPublishing(false)
         return
       }
@@ -874,15 +914,21 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
           `O modpack ainda está grande demais (${(finalBytes / 1024 / 1024).toFixed(1)} MB) mesmo após enviar os ` +
           `configs pesados ao R2 — o peso restante é de metadados/mods. Reduza o conteúdo do modpack.`,
         )
+        setPublishProgress(null)
         setPublishing(false)
         return
       }
 
+      tick('Publicando modpack…')
       await pushModpack(configs)
+      setPublishProgress({ done: total, total, label: 'Publicado!' })
     } catch (err: any) {
       setError(err.message)
+      setPublishProgress(null)
     } finally {
       setPublishing(false)
+      // deixa o "Publicado!" visível um instante antes de sumir (só limpa se ainda existir).
+      setTimeout(() => setPublishProgress(prev => (prev && prev.label === 'Publicado!' ? null : prev)), 1500)
     }
   }
 
@@ -901,6 +947,27 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
 
   const visibleMods = filteredMods.slice(0, visibleCount)
   const hasMore = visibleCount < filteredMods.length
+
+  // Barra de progresso REAL do publish (uploads de config ao R2 + publish final).
+  const publishProgressBar = publishProgress ? (
+    <div style={{ marginTop: 12, maxWidth: 460 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12, marginBottom: 5, color: 'var(--text-secondary)' }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{publishProgress.label}</span>
+        <span style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+          {Math.min(publishProgress.done, publishProgress.total)}/{publishProgress.total}
+        </span>
+      </div>
+      <div style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,0.12)', overflow: 'hidden' }}>
+        <div style={{
+          height: '100%',
+          width: `${Math.round((Math.min(publishProgress.done, publishProgress.total) / Math.max(publishProgress.total, 1)) * 100)}%`,
+          background: 'var(--accent-blue)',
+          borderRadius: 4,
+          transition: 'width 0.25s ease',
+        }} />
+      </div>
+    </div>
+  ) : null
 
   return (
     <div className="admin-view modpack-editor">
@@ -1476,10 +1543,13 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
           </div>
 
           <div className="admin-actions">
-            <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
-              onClick={handlePublish} disabled={publishing}>
-              {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Glitnir' : 'Glitnir Admin'})`}
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
+                onClick={handlePublish} disabled={publishing}>
+                {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Glitnir' : 'Glitnir Admin'})`}
+              </button>
+              {publishProgressBar}
+            </div>
           </div>
         </>
       )}
@@ -1774,10 +1844,13 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
           </div>
 
           <div className="admin-actions">
-            <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
-              onClick={handlePublish} disabled={publishing}>
-              {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Glitnir' : 'Glitnir Admin'})`}
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
+                onClick={handlePublish} disabled={publishing}>
+                {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Glitnir' : 'Glitnir Admin'})`}
+              </button>
+              {publishProgressBar}
+            </div>
           </div>
         </>
       )}
