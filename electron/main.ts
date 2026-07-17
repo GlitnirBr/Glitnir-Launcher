@@ -4,7 +4,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import crypto from 'crypto'
-import { spawn } from 'child_process'
+import { spawn, execFileSync } from 'child_process'
 
 const DATA_PATH = path.join(app.getPath('appData'), 'GlitnirLauncher')
 const CONFIG_FILE = path.join(DATA_PATH, 'config.json')
@@ -566,6 +566,52 @@ function autoDetectValheim(): string {
     if (fs.existsSync(path.join(p, 'valheim.exe'))) return p
   }
   return ''
+}
+
+/**
+ * Localiza o Steam.exe. Necessário para lançar o jogo COM o Steam (estilo r2modman),
+ * passando os args do doorstop no launch — em vez de rodar valheim.exe direto, que na
+ * máquina de alguns usuários faz o Valheim se relançar pela Steam e perder o doorstop
+ * (abre vanilla, sem terminal). Lê o registro (funciona para qualquer biblioteca do Steam),
+ * com fallback derivando do caminho do jogo e dos caminhos fixos.
+ */
+function findSteamExe(valheimPath: string): string | null {
+  const tryReg = (root: string, key: string, val: string): string | null => {
+    try {
+      const out = execFileSync('reg', ['query', `${root}\\${key}`, '/v', val], {
+        encoding: 'utf8',
+      })
+      const m = out.match(new RegExp(`${val}\\s+REG_SZ\\s+(.+)`, 'i'))
+      if (m) {
+        const p = path.normalize(m[1].trim())
+        // SteamPath aponta para a pasta; SteamExe para o exe.
+        const exe = p.toLowerCase().endsWith('.exe') ? p : path.join(p, 'steam.exe')
+        if (fs.existsSync(exe)) return exe
+      }
+    } catch { /* chave ausente / reg indisponível */ }
+    return null
+  }
+
+  const candidates = [
+    () => tryReg('HKCU', 'Software\\Valve\\Steam', 'SteamExe'),
+    () => tryReg('HKCU', 'Software\\Valve\\Steam', 'SteamPath'),
+    () => tryReg('HKLM', 'SOFTWARE\\WOW6432Node\\Valve\\Steam', 'InstallPath'),
+    () => tryReg('HKLM', 'SOFTWARE\\Valve\\Steam', 'InstallPath'),
+    // Fallback: .../Steam/steamapps/common/Valheim -> .../Steam/steam.exe
+    () => {
+      const guess = path.join(valheimPath, '..', '..', '..', 'steam.exe')
+      return fs.existsSync(guess) ? guess : null
+    },
+  ]
+  for (const c of candidates) {
+    const hit = c()
+    if (hit) return hit
+  }
+  // Últimos recursos: caminhos fixos comuns.
+  for (const p of ['C:\\Program Files (x86)\\Steam\\steam.exe', 'C:\\Program Files\\Steam\\steam.exe']) {
+    if (fs.existsSync(p)) return p
+  }
+  return null
 }
 
 function loadConfig() {
@@ -1223,18 +1269,40 @@ app.whenReady().then(() => {
         console.log('[launch] preloader (perfil):', preloaderSrc)
         console.log('[launch] ini written:', doorstopIni.replace(/\r\n/g, '↵'))
 
-        // Use shell.openPath (ShellExecuteEx) — identical to double-clicking from Explorer.
-        // Write a launch bat to the game dir and open it; this ensures correct CWD and
-        // Windows-native DLL loading without any WSL2 spawn quirks.
-        const batPath = path.join(valheimPath, 'glitnir_launch.bat')
-        const batContent = [
-          '@echo off',
-          `cd /d "${valheimPath}"`,
-          `start "" "${exe}"`,
-          '',
-        ].join('\r\n')
-        fs.writeFileSync(batPath, batContent)
-        shell.openPath(batPath)
+        // ── Launch estilo r2modman ───────────────────────────────────────────────────────
+        // Lançamos PELA STEAM passando o caminho do Preloader como argumento do doorstop, em
+        // vez de rodar valheim.exe direto. Motivo: rodar o exe direto faz o Valheim se relançar
+        // pela Steam em algumas máquinas, e a instância relançada sobe SEM o doorstop (abre
+        // vanilla, sem terminal). Lançar pela Steam evita o relançamento e o argumento trafega
+        // em UTF-16 (Unicode-safe), sem depender do doorstop_config.ini (que fica de fallback).
+        // O proxy winhttp.dll continua obrigatório na pasta do jogo (copiado acima).
+        const VALHEIM_APPID = '892970'
+        // doorstop v4 usa doorstop_libs/ + flag --doorstop-enabled; v3 usa --doorstop-enable.
+        const hasDoorstopLibs = fs.existsSync(path.join(profileRoot, 'doorstop_libs'))
+        const doorstopArgs = hasDoorstopLibs
+          ? ['--doorstop-enabled', 'true', '--doorstop-target-assembly', preloaderSrc]
+          : ['--doorstop-enable', 'true', '--doorstop-target-assembly', preloaderSrc, '--doorstop-target', preloaderSrc]
+
+        const steamExe = findSteamExe(valheimPath)
+        if (steamExe) {
+          console.log('[launch] via Steam:', steamExe, '-applaunch', VALHEIM_APPID, doorstopArgs.join(' '))
+          spawn(steamExe, ['-applaunch', VALHEIM_APPID, ...doorstopArgs], {
+            detached: true,
+            stdio: 'ignore',
+            cwd: valheimPath,
+          }).unref()
+        } else {
+          // Fallback 1: protocolo steam://run (resolvido pelo Windows, sem precisar do Steam.exe).
+          // Fallback 2: se nem o protocolo abrir, cai no launch direto do exe (comportamento antigo).
+          const argStr = doorstopArgs.map(a => (a.includes(' ') ? `"${a}"` : a)).join(' ')
+          const steamUrl = `steam://run/${VALHEIM_APPID}//${encodeURIComponent(argStr)}`
+          console.log('[launch] via steam:// protocolo:', steamUrl)
+          shell.openExternal(steamUrl).catch(() => {
+            const batPath = path.join(valheimPath, 'glitnir_launch.bat')
+            fs.writeFileSync(batPath, ['@echo off', `cd /d "${valheimPath}"`, `start "" "${exe}"`, ''].join('\r\n'))
+            shell.openPath(batPath)
+          })
+        }
       }
       win.minimize()
       return { success: true }
