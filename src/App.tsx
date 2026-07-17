@@ -402,6 +402,15 @@ export default function App() {
         const dl = await window.glitnir.mods.download({ url, modName: mod.name, headers, sha256: mod.sha256 })
         if (!dl.success) throw new Error(dl.error || `Falha ao baixar ${mod.name}`)
 
+        // Mod que já estava instalado e entrou aqui = mudou de versão (o admin trocou). O install
+        // só MESCLA arquivos (copyDirRecursive), então sem apagar antes uma dll renomeada da versão
+        // anterior continuaria no perfil — inclusive em downgrade. Removemos depois do download já
+        // ter dado certo, pra não deixar o mod sem arquivos se a rede falhar no meio.
+        if (mod.installed) {
+          setInstallStatus(`Atualizando ${mod.name}...`)
+          await window.glitnir.mods.remove({ modName: mod.name, profile })
+        }
+
         setInstallStatus(`Instalando ${mod.name}...`)
         const inst = await window.glitnir.mods.install({
           zipPath: dl.tempPath!,
