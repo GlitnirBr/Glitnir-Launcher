@@ -18,8 +18,10 @@
       "artifactName": "GlitnirLauncher-Setup-${version}.${ext}"
     },
     "nsis": {
-      "oneClick": true,
-      "allowToChangeInstallationDirectory": false
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true
     },
     "files": [
       "dist/**/*",
