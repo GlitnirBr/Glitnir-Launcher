@@ -828,7 +828,13 @@ app.whenReady().then(() => {
           // Registra os arquivos roteados p/ pastas compartilhadas para o mods:remove limpá-los.
           writeModManifest(profileDir(profile), mod, external)
         }
-        fs.rmSync(staging, { recursive: true, force: true })
+        // Limpeza do staging é BEST-EFFORT: nesse ponto a extração + roteamento já terminaram
+        // com sucesso, então uma falha ao apagar o temp NÃO pode abortar o install. No Windows,
+        // apagar %LOCALAPPDATA%\Temp\... dá ENOTEMPTY/EBUSY/EPERM quando antivírus/indexador ainda
+        // segura um handle; maxRetries faz o Node retentar, e o catch evita que sobre (o SO limpa o Temp).
+        try {
+          fs.rmSync(staging, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+        } catch { /* temp órfão no %TEMP%; o mod já está instalado, o SO recolhe depois */ }
       }
 
       fs.unlinkSync(zipPath)
