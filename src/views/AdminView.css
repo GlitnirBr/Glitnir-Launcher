@@ -179,6 +179,13 @@
   min-width: 200px;
 }
 
+/* Ícone do mod na lista do modpack — menor que o do browser Thunderstore (48px). */
+.modpack-mod-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+}
+
 .version-input {
   width: 100px !important;
   padding: 6px 10px !important;

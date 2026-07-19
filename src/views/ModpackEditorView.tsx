@@ -36,6 +36,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [packBattlemetricsId, setPackBattlemetricsId] = useState('')
   const [modpackMods, setModpackMods] = useState<Mod[]>([])
   const [modpackConfigs, setModpackConfigs] = useState<ModConfig[]>([])
+  // Busca na lista de mods JÁ no modpack (aba Modpack). Filtra só a exibição —
+  // os handlers continuam usando o índice original do array (ver visibleModpackMods).
+  const [modpackFilter, setModpackFilter] = useState('')
 
   // Selected version per mod in the Thunderstore browser (key: full_name), defaults to latest
   const [selectedVersions, setSelectedVersions] = useState<Record<string, string>>({})
@@ -951,6 +954,25 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const visibleMods = filteredMods.slice(0, visibleCount)
   const hasMore = visibleCount < filteredMods.length
 
+  /** Ícone do mod (só thunderstore tem): casa por owner/name no catálogo carregado. */
+  const modIconFor = useCallback((mod: Mod): string | undefined => {
+    if (mod.source !== 'thunderstore') return undefined
+    return allMods.find(m => m.name === mod.name && m.owner === mod.namespace)?.latest.icon
+  }, [allMods])
+
+  // Lista do modpack filtrada pela busca, preservando o ÍNDICE ORIGINAL — os handlers
+  // (remover/opcional/versão) indexam o array real, então não podem receber índice filtrado.
+  const visibleModpackMods = useMemo(() => {
+    const q = modpackFilter.toLowerCase().trim()
+    const withIndex = modpackMods.map((mod, index) => ({ mod, index }))
+    if (!q) return withIndex
+    return withIndex.filter(({ mod }) =>
+      mod.name.toLowerCase().includes(q) ||
+      (mod.namespace?.toLowerCase().includes(q) ?? false) ||
+      (mod.filename?.toLowerCase().includes(q) ?? false)
+    )
+  }, [modpackMods, modpackFilter])
+
   // Barra de progresso REAL do publish (uploads de config ao R2 + publish final).
   const publishProgressBar = publishProgress ? (
     <div style={{ marginTop: 12, maxWidth: 460 }}>
@@ -1390,10 +1412,40 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                   para adicionar mods do Thunderstore.
                 </p>
               ) : (
+                <>
+                  <input
+                    type="text"
+                    value={modpackFilter}
+                    onChange={e => setModpackFilter(e.target.value)}
+                    placeholder="Buscar mod no modpack por nome ou autor..."
+                    className="ts-search-input"
+                    style={{ marginBottom: 12 }}
+                  />
+                  {modpackFilter.trim() && (
+                    <p className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                      {visibleModpackMods.length} de {modpackMods.length} mods
+                    </p>
+                  )}
+                  {visibleModpackMods.length === 0 ? (
+                    <p className="text-muted">Nenhum mod corresponde à busca.</p>
+                  ) : (
                 <div className="modpack-mods">
-                  {modpackMods.map((mod, index) => (
+                  {visibleModpackMods.map(({ mod, index }) => {
+                    const icon = modIconFor(mod)
+                    return (
                     <div key={`${mod.name}-${index}`} className="modpack-mod-item">
                       <div className="mod-info">
+                        {icon ? (
+                          <img
+                            className="ts-mod-icon modpack-mod-icon"
+                            src={icon}
+                            alt={mod.name}
+                            loading="lazy"
+                            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                          />
+                        ) : (
+                          <div className="ts-mod-icon ts-mod-icon-placeholder modpack-mod-icon" />
+                        )}
                         <span className="mod-name">
                           {mod.name}{' '}
                           <span className={`badge ${mod.source === 'private' ? 'badge-warning' : 'badge-update'}`}>
@@ -1437,8 +1489,11 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                       </label>
                       <button className="btn-ghost btn-remove" onClick={() => handleRemoveMod(index)}>Remover</button>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
+                  )}
+                </>
               )}
             </div>
           </div>
