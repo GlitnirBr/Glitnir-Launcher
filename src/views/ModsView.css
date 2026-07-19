@@ -45,6 +45,108 @@
   height: 20px;
 }
 
+.mods-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.btn-reset-profile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.btn-reset-profile:hover {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.5);
+  background: rgba(255, 107, 107, 0.08);
+}
+
+.btn-reset-profile svg {
+  width: 16px;
+  height: 16px;
+}
+
+.reset-confirm-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  border-radius: var(--radius-md, 10px);
+  background: rgba(255, 107, 107, 0.08);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+.reset-confirm-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reset-confirm-text strong {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.reset-confirm-text span {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.reset-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.reset-confirm-actions .btn-ghost {
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+}
+
+.reset-confirm-actions .btn-ghost:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.btn-danger {
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  background: linear-gradient(135deg, #ff6b6b 0%, #e04848 100%);
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.15s ease;
+}
+
+.btn-danger:hover {
+  filter: brightness(1.08);
+}
+
 .status-badge {
   display: flex;
   align-items: center;
@@ -113,10 +215,29 @@
 .mod-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 14px;
   padding: 16px 0;
   border-bottom: 1px solid var(--border-color);
   transition: background 0.15s ease;
+}
+
+.mod-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--accent-blue-faint);
+  border: 1px solid var(--border-color);
+}
+
+.mod-icon-placeholder {
+  background: linear-gradient(135deg, rgba(58,123,213,0.18), rgba(58,123,213,0.05));
+}
+
+.mod-item .mod-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .mod-item:last-child {

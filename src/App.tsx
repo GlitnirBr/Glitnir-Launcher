@@ -452,6 +452,37 @@ export default function App() {
     }
   }
 
+  // Apaga o profile inteiro e reinstala tudo do zero. Atalho para o procedimento manual que
+  // resolvia instalações corrompidas ("apaga o profile e instala de novo"). Como removeProfile
+  // apaga a pasta, o bepinexOk dentro de handleInstallMods dá falso e força reinstalar todos os mods.
+  async function handleResetProfile() {
+    if (!modpackData || !config || selectedModpack === 'vanilla') return
+
+    setInstalling(true)
+    setInstallProgress(0)
+    setInstallStatus('Apagando profile...')
+    try {
+      const profile = selectedModpack
+      const r = await window.glitnir.mods.removeProfile(profile)
+      if (!r.success) throw new Error(r.error || 'Falha ao apagar o profile')
+
+      // Limpa o estado cacheado do profile para a reinstalação começar do zero.
+      const installedByProfile = { ...(config.installedByProfile || {}) }
+      delete installedByProfile[profile]
+      const configsHashByProfile = { ...(config.configsHashByProfile || {}) }
+      delete configsHashByProfile[profile]
+      await handleSaveConfig({ installedByProfile, configsHashByProfile })
+
+      // Marca tudo como não instalado no estado local antes de refazer o install.
+      setMods(prev => prev.map(m => ({ ...m, installed: false, outdated: false })))
+
+      await handleInstallMods()
+    } catch (err: any) {
+      setInstallStatus(err.message || 'Erro ao reinstalar')
+      setInstalling(false)
+    }
+  }
+
   async function handlePlay() {
     if (!config?.valheimPath) {
       const path = await window.glitnir.dialog.selectValheimPath()
@@ -587,6 +618,7 @@ export default function App() {
             mods={mods}
             selectedModpackId={selectedModpack}
             onInstallMods={handleInstallMods}
+            onResetProfile={handleResetProfile}
             installing={installing}
             onToggleOptionalMod={handleToggleOptionalMod}
           />

@@ -7,8 +7,17 @@ interface Props {
   mods: (Mod & { installed?: boolean; outdated?: boolean; optionalDisabled?: boolean })[]
   selectedModpackId: string
   onInstallMods: () => Promise<void>
+  onResetProfile: () => Promise<void>
   installing: boolean
   onToggleOptionalMod: (modName: string, enabled: boolean) => void
+}
+
+/** URL do ícone do mod. Só thunderstore tem — o CDN segue o padrão owner-name-version.png. */
+function modIconUrl(mod: Mod): string | null {
+  if (mod.source === 'thunderstore' && mod.namespace && mod.version) {
+    return `https://gcdn.thunderstore.io/live/repository/icons/${mod.namespace}-${mod.name}-${mod.version}.png`
+  }
+  return null
 }
 
 export default function ModsView({
@@ -16,10 +25,12 @@ export default function ModsView({
   mods,
   selectedModpackId,
   onInstallMods,
+  onResetProfile,
   installing,
   onToggleOptionalMod,
 }: Props) {
   const [error, setError] = useState('')
+  const [confirmingReset, setConfirmingReset] = useState(false)
 
   const isVanilla = selectedModpackId === 'vanilla'
   // Precisa agir só quando um mod ATIVO está faltando ou desatualizado. Desativar um opcional é
@@ -34,6 +45,16 @@ export default function ModsView({
       await onInstallMods()
     } catch (err: any) {
       setError(err.message || 'Erro ao instalar mods')
+    }
+  }
+
+  async function handleReset() {
+    setConfirmingReset(false)
+    setError('')
+    try {
+      await onResetProfile()
+    } catch (err: any) {
+      setError(err.message || 'Erro ao reinstalar')
     }
   }
 
@@ -67,25 +88,55 @@ export default function ModsView({
             </p>
           )}
         </div>
-        {needsUpdate && !installing && (
-          <button className="btn-secondary btn-update" onClick={handleInstall}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7,10 12,15 17,10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            Baixar e Instalar Mods
-          </button>
-        )}
-        {!needsUpdate && !installing && totalCount > 0 && (
-          <div className="status-badge status-ok">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="20,6 9,17 4,12" />
-            </svg>
-            Todos instalados
+        {!installing && (
+          <div className="mods-header-actions">
+            {needsUpdate && (
+              <button className="btn-secondary btn-update" onClick={handleInstall}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7,10 12,15 17,10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Baixar e Instalar Mods
+              </button>
+            )}
+            {!needsUpdate && totalCount > 0 && (
+              <div className="status-badge status-ok">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="20,6 9,17 4,12" />
+                </svg>
+                Todos instalados
+              </div>
+            )}
+            {totalCount > 0 && (
+              <button
+                className="btn-ghost btn-reset-profile"
+                onClick={() => setConfirmingReset(true)}
+                title="Apaga o profile e reinstala todos os mods do zero. Use quando a instalação estiver com problema."
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="1 4 1 10 7 10" />
+                  <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                </svg>
+                Reinstalar do zero
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {confirmingReset && (
+        <div className="reset-confirm-banner">
+          <div className="reset-confirm-text">
+            <strong>Apagar o profile e reinstalar tudo?</strong>
+            <span>Todos os mods deste modpack serão apagados e baixados novamente do zero. Útil quando a instalação ficou com problema.</span>
+          </div>
+          <div className="reset-confirm-actions">
+            <button className="btn-ghost" onClick={() => setConfirmingReset(false)}>Cancelar</button>
+            <button className="btn-danger" onClick={handleReset}>Apagar e reinstalar</button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="error-banner">
@@ -125,6 +176,7 @@ export default function ModsView({
               const tsUrl = mod.source === 'thunderstore' && mod.namespace
                 ? `https://thunderstore.io/c/valheim/p/${mod.namespace}/${mod.name}/`
                 : null
+              const iconUrl = modIconUrl(mod)
               return (
                 <div
                   key={`${mod.name}-${i}`}
@@ -132,6 +184,17 @@ export default function ModsView({
                   title={tsUrl ? 'Clique para ver no Thunderstore' : undefined}
                   onClick={() => tsUrl && (window as any).glitnir?.shell?.openExternal(tsUrl)}
                 >
+                  {iconUrl ? (
+                    <img
+                      className="mod-icon"
+                      src={iconUrl}
+                      alt=""
+                      loading="lazy"
+                      onError={e => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }}
+                    />
+                  ) : (
+                    <div className="mod-icon mod-icon-placeholder" />
+                  )}
                   <div className="mod-info">
                     <span className="mod-name">
                       {mod.name}

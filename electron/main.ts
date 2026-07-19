@@ -1182,6 +1182,25 @@ app.whenReady().then(() => {
     return { success: false, error: 'Mod não encontrado' }
   })
 
+  // Apaga o perfil inteiro (pasta do modpack) para forçar uma reinstalação limpa do zero.
+  // Usado quando a instalação corrompe/falha no meio: em vez de mandar o jogador apagar a pasta
+  // na mão, o botão "reinstalar do zero" chama isto e depois refaz o install completo.
+  ipcMain.handle('mods:removeProfile', (_e, profile: string) => {
+    try {
+      const profileRoot = profileDir(profile)
+      // Segurança: só apaga dentro da raiz de perfis (bloqueia id adulterado com path traversal).
+      const root = path.resolve(getProfilesRoot())
+      const resolved = path.resolve(profileRoot)
+      if (resolved === root || !resolved.startsWith(root + path.sep)) {
+        return { success: false, error: 'Caminho de perfil inválido' }
+      }
+      if (fs.existsSync(resolved)) fs.rmSync(resolved, { recursive: true, force: true })
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
   // Liga/desliga um mod opcional MOVENDO os arquivos (estilo r2modman), sem apagar/re-baixar.
   ipcMain.handle('mods:setOptionalEnabled', (_e, { profile, modName, enabled, version }: { profile: string; modName: string; enabled: boolean; version?: string }) => {
     try {

@@ -137,6 +137,7 @@ declare global {
         download: (args: { url: string; modName: string; headers?: Record<string, string>; sha256?: string }) => Promise<{ success: boolean; tempPath?: string; error?: string }>
         list: (profile: string) => Promise<string[]>
         remove: (args: { modName: string; profile: string }) => Promise<{ success: boolean; error?: string }>
+        removeProfile: (profile: string) => Promise<{ success: boolean; error?: string }>
         setOptionalEnabled: (args: { profile: string; modName: string; enabled: boolean; version?: string }) => Promise<{ success: boolean; moved?: boolean; version?: string; error?: string }>
         applyConfig: (args: { profile: string; installPath: string; content: string }) => Promise<{ success: boolean; error?: string }>
         applyConfigs: (args: { profile: string; configs: { installPath: string; content: string; filename?: string }[] }) => Promise<{ success: boolean; total?: number; applied?: number; skipped?: number; failed?: number; error?: string }>
