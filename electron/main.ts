@@ -28,6 +28,39 @@ function safeName(name?: string): string {
   return (name || 'mod').replace(/[^a-zA-Z0-9_-]/g, '_')
 }
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+/**
+ * Um download falhou por rede/TLS transitório (vale a pena tentar de novo) e não por erro
+ * definitivo (404, integridade). O caso clássico é `BAD_DECRYPT` do BoringSSL: antivírus/proxy
+ * que inspeciona HTTPS corrompe o stream TLS e a descriptografia falha — costuma passar numa nova
+ * tentativa. Cobrimos também reset/timeout de conexão e respostas 429/5xx do servidor.
+ */
+function isRetryableNetworkError(err: any): boolean {
+  const status = err?.response?.status
+  if (status && (status === 429 || status >= 500)) return true
+  const code = String(err?.code || '')
+  if (/ECONNRESET|ETIMEDOUT|ECONNABORTED|EPIPE|EAI_AGAIN|ENETUNREACH|EPROTO|ERR_SSL/i.test(code)) return true
+  const msg = String(err?.message || '')
+  return /BAD_DECRYPT|decryption failed|ssl|tls|socket hang up|timeout|network|ECONNRESET|EPROTO/i.test(msg)
+}
+
+/**
+ * Converte o erro cru de um download numa mensagem que o jogador entende e consegue agir.
+ * Sem isso, uma falha de TLS aparecia como o despejo do OpenSSL (`error:...BAD_DECRYPT: e_aes.c`),
+ * que assusta e não diz o que fazer. Erros de rede/TLS quase sempre são ambientais na máquina do
+ * player (antivírus com scan de HTTPS, VPN/proxy), então apontamos direto pra causa.
+ */
+function friendlyDownloadError(err: any, modName: string): string {
+  if (isRetryableNetworkError(err)) {
+    return `Falha ao baixar ${modName}: a conexão foi interrompida ou corrompida. ` +
+      `Geralmente é o antivírus (inspeção de HTTPS/SSL), uma VPN ou proxy mexendo na conexão. ` +
+      `Tente: desativar temporariamente o scan de web do antivírus ou adicionar o Glitnir Launcher às exceções, ` +
+      `desligar VPN/proxy, ou trocar de rede — e clique em jogar de novo.`
+  }
+  return `Falha ao baixar ${modName}: ${err?.message || 'erro desconhecido'}`
+}
+
 /**
  * Parseia os bytes de um perfil r2modman (ZIP contendo `export.r2x` + pasta `config/`)
  * para a lista de mods e configs do Glitnir. É o MESMO conteúdo tanto de um arquivo
@@ -851,14 +884,30 @@ app.whenReady().then(() => {
         return { success: false, error: 'URL de download inválida' }
       }
       const axios = require('axios')
-      const response = await axios.get(url, {
-        responseType: 'arraybuffer',
-        headers: headers || undefined,
-        maxRedirects: 5,
-        timeout: 120000,
-        maxContentLength: 512 * 1024 * 1024, // teto de 512MB contra payloads gigantes
-        maxBodyLength: 512 * 1024 * 1024,
-      })
+      // Retry com backoff: falhas de TLS/rede (ex.: BAD_DECRYPT de antivírus inspecionando HTTPS)
+      // costumam ser transitórias e passam numa nova tentativa. Erros definitivos (404, URL inválida)
+      // não são retentados — isRetryableNetworkError filtra. Até 3 tentativas: ~1s, ~3s de espera.
+      const MAX_ATTEMPTS = 3
+      let response: any
+      for (let attempt = 1; ; attempt++) {
+        try {
+          response = await axios.get(url, {
+            responseType: 'arraybuffer',
+            headers: headers || undefined,
+            maxRedirects: 5,
+            timeout: 120000,
+            maxContentLength: 512 * 1024 * 1024, // teto de 512MB contra payloads gigantes
+            maxBodyLength: 512 * 1024 * 1024,
+          })
+          break
+        } catch (err: any) {
+          if (attempt >= MAX_ATTEMPTS || !isRetryableNetworkError(err)) {
+            return { success: false, error: friendlyDownloadError(err, modName) }
+          }
+          console.warn(`[download] tentativa ${attempt}/${MAX_ATTEMPTS} falhou para ${modName}: ${err?.code || err?.message}`)
+          await sleep(attempt * 2000 - 1000) // 1s, 3s
+        }
+      }
       const buf = Buffer.from(response.data)
 
       // Verificação de integridade (defense-in-depth): se o manifesto trouxer um sha256, o
@@ -877,7 +926,7 @@ app.whenReady().then(() => {
       fs.writeFileSync(tempPath, buf)
       return { success: true, tempPath }
     } catch (err: any) {
-      return { success: false, error: err.message }
+      return { success: false, error: friendlyDownloadError(err, modName) }
     }
   })
 
