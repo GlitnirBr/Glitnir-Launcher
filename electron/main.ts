@@ -1268,6 +1268,23 @@ app.whenReady().then(() => {
         return { success: false, error: 'valheim.exe não encontrado no caminho configurado.' }
       }
       if (mode === 'vanilla') {
+        // Um launch modado anterior deixa o proxy do doorstop na pasta do jogo
+        // (winhttp.dll + doorstop_config.ini + doorstop_libs/). Esse proxy é carregado
+        // pelo Valheim em QUALQUER inicialização — inclusive rodando valheim.exe direto —
+        // e injeta o BepInEx/mods do perfil. Sem removê-lo, o "vanilla" sobe modado.
+        // Removemos os artefatos do doorstop antes de lançar (best-effort: ignora se em uso).
+        const doorstopArtifacts = [
+          path.join(valheimPath, 'winhttp.dll'),
+          path.join(valheimPath, 'doorstop_config.ini'),
+        ]
+        for (const p of doorstopArtifacts) {
+          try { if (fs.existsSync(p)) fs.rmSync(p, { force: true }) } catch { /* em uso? ignora */ }
+        }
+        try {
+          const libs = path.join(valheimPath, 'doorstop_libs')
+          if (fs.existsSync(libs)) fs.rmSync(libs, { recursive: true, force: true })
+        } catch { /* em uso? ignora */ }
+
         spawn(exe, [], { detached: true, stdio: 'ignore', cwd: valheimPath }).unref()
       } else {
         const profileRoot = profileDir(profile)
