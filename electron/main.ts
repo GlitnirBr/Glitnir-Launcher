@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, session } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, session, net } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import fs from 'fs'
@@ -8,6 +8,9 @@ import { spawn, execFileSync } from 'child_process'
 
 const DATA_PATH = path.join(app.getPath('appData'), 'GlitnirLauncher')
 const CONFIG_FILE = path.join(DATA_PATH, 'config.json')
+// Log de falhas de download. É o único artefato que o player consegue nos mandar quando
+// "não baixa" — sem ele a mensagem amigável esconde o erro real (código TLS, HTTP, DNS).
+const DOWNLOAD_LOG = path.join(DATA_PATH, 'download-errors.log')
 const PROFILES_ROOT = path.join(DATA_PATH, 'profiles')
 
 // Tamanho da parte do upload multipart de mod. R2 exige partes uniformes (exceto a
@@ -46,19 +49,111 @@ function isRetryableNetworkError(err: any): boolean {
 }
 
 /**
+ * Erro de CADEIA DE CERTIFICADO — categoria diferente de "conexão caiu". Acontece quando algo
+ * (antivírus com scan de HTTPS, proxy corporativo, VPN de filtragem) intercepta a conexão e
+ * apresenta um certificado próprio: o Windows confia nele (o AV instala a CA raiz na loja do SO),
+ * MAS o Node do Electron não — ele usa a lista de CAs embutida e ignora a loja do Windows.
+ * Resultado clássico: o navegador do player baixa normal, o launcher não. Isso NÃO é transitório —
+ * retentar com axios falha sempre. A saída é refazer o download pela pilha do Chromium (net.fetch),
+ * que usa a loja de certificados do SO. Ver fetchViaChromium/downloadWithFallback.
+ */
+function isCertTrustError(err: any): boolean {
+  const s = `${err?.code || ''} ${err?.message || ''}`
+  return /SELF_SIGNED_CERT|self.signed certificate|UNABLE_TO_VERIFY_LEAF|UNABLE_TO_GET_ISSUER|DEPTH_ZERO_SELF_SIGNED|CERT_HAS_EXPIRED|CERT_UNTRUSTED|ERR_TLS_CERT_ALTNAME|unable to get local issuer/i.test(s)
+}
+
+/** DNS não resolveu: provedor/roteador bloqueando ou DNS quebrado — não é o mesmo que TLS. */
+function isDnsError(err: any): boolean {
+  return /ENOTFOUND|EAI_AGAIN/i.test(`${err?.code || ''} ${err?.message || ''}`)
+}
+
+/** Vale tentar o caminho alternativo (Chromium) — qualquer falha de transporte, não de conteúdo. */
+function isNetworkishError(err: any): boolean {
+  return isRetryableNetworkError(err) || isCertTrustError(err) || isDnsError(err)
+}
+
+/**
+ * Detalhe técnico curto do erro (código, HTTP, causa). Vai NO FIM da mensagem do player e no log:
+ * sem isso, "a conexão foi interrompida" cobre desde DNS até 503 do CDN e não dá pra diagnosticar
+ * remotamente — foi exatamente o que aconteceu no caso do BepInExPack_Valheim.
+ */
+function describeDownloadError(err: any): string {
+  const parts: string[] = []
+  const status = err?.response?.status
+  if (status) parts.push(`HTTP ${status}`)
+  if (err?.code) parts.push(String(err.code))
+  const cause = err?.cause?.code
+  if (cause && cause !== err?.code) parts.push(String(cause))
+  const msg = String(err?.message || '').replace(/\s+/g, ' ').slice(0, 180)
+  if (msg) parts.push(msg)
+  return parts.join(' · ') || 'erro desconhecido'
+}
+
+/** Proxy configurado por variável de ambiente — axios o usa silenciosamente e ele pode estar morto. */
+function proxyEnvNote(): string {
+  const env = process.env
+  const proxy = env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy
+  return proxy ? ` Obs.: há um proxy configurado no sistema (${proxy}) — se ele não estiver mais ativo, remova a variável de ambiente.` : ''
+}
+
+/** Anexa uma linha ao log de downloads (rotaciona em 512KB). Best-effort: nunca quebra o fluxo. */
+function logDownloadIssue(line: string): void {
+  console.warn('[download]', line)
+  try {
+    fs.mkdirSync(DATA_PATH, { recursive: true })
+    try {
+      if (fs.statSync(DOWNLOAD_LOG).size > 512 * 1024) fs.unlinkSync(DOWNLOAD_LOG)
+    } catch { /* log ainda não existe */ }
+    fs.appendFileSync(DOWNLOAD_LOG, `[${new Date().toISOString()}] ${line}\n`)
+  } catch { /* disco cheio/sem permissão: o log é auxiliar, o download continua */ }
+}
+
+/**
  * Converte o erro cru de um download numa mensagem que o jogador entende e consegue agir.
  * Sem isso, uma falha de TLS aparecia como o despejo do OpenSSL (`error:...BAD_DECRYPT: e_aes.c`),
- * que assusta e não diz o que fazer. Erros de rede/TLS quase sempre são ambientais na máquina do
- * player (antivírus com scan de HTTPS, VPN/proxy), então apontamos direto pra causa.
+ * que assusta e não diz o que fazer. Cada causa tem uma ação diferente — antes tudo virava
+ * "desative o antivírus", o que fazia o player perder tempo quando o problema era o CDN ou o DNS.
  */
 function friendlyDownloadError(err: any, modName: string): string {
+  const detail = ` (detalhe: ${describeDownloadError(err)}; log em ${DOWNLOAD_LOG})`
+  const status = err?.response?.status
+  if (status && (status === 429 || status >= 500)) {
+    return `Falha ao baixar ${modName}: o servidor de mods respondeu com erro (${status}). ` +
+      `Não é problema do seu PC — espere alguns minutos e clique em jogar de novo.${detail}`
+  }
+  if (isDnsError(err)) {
+    return `Falha ao baixar ${modName}: não foi possível resolver o endereço do servidor de mods (DNS). ` +
+      `Tente trocar o DNS do Windows para 1.1.1.1 ou 8.8.8.8, reiniciar o roteador, ou testar em outra rede ` +
+      `(ex.: roteando pelo celular).${proxyEnvNote()}${detail}`
+  }
+  if (isCertTrustError(err)) {
+    return `Falha ao baixar ${modName}: o certificado do servidor não foi aceito — algo está interceptando a conexão ` +
+      `(antivírus com scan de HTTPS, proxy da empresa/faculdade ou VPN de filtragem). Adicione o Glitnir Launcher ` +
+      `às exceções do antivírus, desligue o scan de HTTPS/web, ou use outra rede.${proxyEnvNote()}${detail}`
+  }
   if (isRetryableNetworkError(err)) {
     return `Falha ao baixar ${modName}: a conexão foi interrompida ou corrompida. ` +
       `Geralmente é o antivírus (inspeção de HTTPS/SSL), uma VPN ou proxy mexendo na conexão. ` +
       `Tente: desativar temporariamente o scan de web do antivírus ou adicionar o Glitnir Launcher às exceções, ` +
-      `desligar VPN/proxy, ou trocar de rede — e clique em jogar de novo.`
+      `desligar VPN/proxy, ou trocar de rede — e clique em jogar de novo.${proxyEnvNote()}${detail}`
   }
-  return `Falha ao baixar ${modName}: ${err?.message || 'erro desconhecido'}`
+  return `Falha ao baixar ${modName}: ${err?.message || 'erro desconhecido'}${detail}`
+}
+
+/**
+ * Baixa pela pilha de rede do Chromium (Electron `net`) em vez do Node. Diferenças que importam:
+ * usa a LOJA DE CERTIFICADOS DO WINDOWS (então aceita a CA raiz que o antivírus/proxy instalou) e
+ * as configurações de proxy do SO. É o plano B quando o axios falha por transporte — mesma URL,
+ * mesmos headers, caminho de rede diferente.
+ */
+async function fetchViaChromium(url: string, headers?: Record<string, string>): Promise<Buffer> {
+  const res = await net.fetch(url, { headers: headers || undefined, redirect: 'follow' })
+  if (!res.ok) {
+    const e: any = new Error(`HTTP ${res.status} ${res.statusText}`)
+    e.response = { status: res.status }
+    throw e
+  }
+  return Buffer.from(await res.arrayBuffer())
 }
 
 /**
@@ -888,10 +983,11 @@ app.whenReady().then(() => {
       // costumam ser transitórias e passam numa nova tentativa. Erros definitivos (404, URL inválida)
       // não são retentados — isRetryableNetworkError filtra. Até 3 tentativas: ~1s, ~3s de espera.
       const MAX_ATTEMPTS = 3
-      let response: any
-      for (let attempt = 1; ; attempt++) {
+      let buf: Buffer | undefined
+      let lastErr: any
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
-          response = await axios.get(url, {
+          const response = await axios.get(url, {
             responseType: 'arraybuffer',
             headers: headers || undefined,
             maxRedirects: 5,
@@ -899,16 +995,35 @@ app.whenReady().then(() => {
             maxContentLength: 512 * 1024 * 1024, // teto de 512MB contra payloads gigantes
             maxBodyLength: 512 * 1024 * 1024,
           })
+          buf = Buffer.from(response.data)
           break
         } catch (err: any) {
-          if (attempt >= MAX_ATTEMPTS || !isRetryableNetworkError(err)) {
-            return { success: false, error: friendlyDownloadError(err, modName) }
-          }
-          console.warn(`[download] tentativa ${attempt}/${MAX_ATTEMPTS} falhou para ${modName}: ${err?.code || err?.message}`)
-          await sleep(attempt * 2000 - 1000) // 1s, 3s
+          lastErr = err
+          logDownloadIssue(`${modName}: tentativa ${attempt}/${MAX_ATTEMPTS} (node/axios) falhou — ${describeDownloadError(err)}`)
+          if (!isRetryableNetworkError(err)) break // 404, integridade, cert: retentar não muda nada
+          if (attempt < MAX_ATTEMPTS) await sleep(attempt * 2000 - 1000) // 1s, 3s
         }
       }
-      const buf = Buffer.from(response.data)
+
+      // Plano B: refaz pelo Chromium, que confia na loja de certificados do Windows e usa o proxy
+      // do SO. Cobre o caso em que o antivírus/proxy intercepta HTTPS — o navegador do player baixa
+      // normal e só o launcher falha. Só vale para falhas de TRANSPORTE (404 continua sendo 404).
+      if (!buf && isNetworkishError(lastErr)) {
+        try {
+          buf = await fetchViaChromium(url, headers)
+          logDownloadIssue(`${modName}: recuperado pelo fallback do Chromium após falha do node (${describeDownloadError(lastErr)})`)
+        } catch (err: any) {
+          logDownloadIssue(`${modName}: fallback do Chromium também falhou — ${describeDownloadError(err)}`)
+          // Reporta o erro mais informativo dos dois: o do Chromium costuma trazer ERR_* do net.
+          lastErr = err?.response?.status ? err : lastErr
+        }
+      }
+
+      if (!buf) {
+        const msg = friendlyDownloadError(lastErr, modName)
+        logDownloadIssue(`${modName}: DESISTINDO — url=${url.split('?')[0]} — ${describeDownloadError(lastErr)}`)
+        return { success: false, error: msg }
+      }
 
       // Verificação de integridade (defense-in-depth): se o manifesto trouxer um sha256, o
       // download só é aceito se o hash bater. Protege contra um repositório/mirror adulterado.
