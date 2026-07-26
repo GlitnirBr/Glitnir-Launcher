@@ -45,7 +45,9 @@ function isRetryableNetworkError(err: any): boolean {
   const code = String(err?.code || '')
   if (/ECONNRESET|ETIMEDOUT|ECONNABORTED|EPIPE|EAI_AGAIN|ENETUNREACH|EPROTO|ERR_SSL/i.test(code)) return true
   const msg = String(err?.message || '')
-  return /BAD_DECRYPT|decryption failed|ssl|tls|socket hang up|timeout|network|ECONNRESET|EPROTO/i.test(msg)
+  // `net::ERR_*` / "Failed to fetch" são a forma como a rota do Chromium reporta falha de
+  // transporte (status HTTP lá não vira exceção), então também contam como transitórios.
+  return /BAD_DECRYPT|decryption failed|ssl|tls|socket hang up|timeout|network|ECONNRESET|EPROTO|net::ERR_|Failed to fetch/i.test(msg)
 }
 
 /**
@@ -59,7 +61,8 @@ function isRetryableNetworkError(err: any): boolean {
  */
 function isCertTrustError(err: any): boolean {
   const s = `${err?.code || ''} ${err?.message || ''}`
-  return /SELF_SIGNED_CERT|self.signed certificate|UNABLE_TO_VERIFY_LEAF|UNABLE_TO_GET_ISSUER|DEPTH_ZERO_SELF_SIGNED|CERT_HAS_EXPIRED|CERT_UNTRUSTED|ERR_TLS_CERT_ALTNAME|unable to get local issuer/i.test(s)
+  // `ERR_CERT_*` é a versão do Chromium do mesmo problema (ex.: ERR_CERT_AUTHORITY_INVALID).
+  return /SELF_SIGNED_CERT|self.signed certificate|UNABLE_TO_VERIFY_LEAF|UNABLE_TO_GET_ISSUER|DEPTH_ZERO_SELF_SIGNED|CERT_HAS_EXPIRED|CERT_UNTRUSTED|ERR_TLS_CERT_ALTNAME|ERR_CERT_|unable to get local issuer/i.test(s)
 }
 
 /** DNS não resolveu: provedor/roteador bloqueando ou DNS quebrado — não é o mesmo que TLS. */
@@ -154,6 +157,62 @@ async function fetchViaChromium(url: string, headers?: Record<string, string>): 
     throw e
   }
   return Buffer.from(await res.arrayBuffer())
+}
+
+/**
+ * Rota preferida de download NESTA SESSÃO. Começa no node (axios, caminho histórico) e vira
+ * 'chromium' assim que um mod só consegue baixar pelo fallback — o que significa que o ambiente
+ * do player quebra a pilha do node (AV interceptando HTTPS, proxy do SO). Sem esse estado, CADA
+ * mod do modpack pagaria de novo as 3 tentativas + ~4s de backoff antes do fallback: num modpack
+ * de dezenas de mods são minutos de espera garantida. Não é persistido em disco de propósito —
+ * o player pode desligar o AV entre sessões, e reabrir o launcher volta a testar o node.
+ */
+let preferredRoute: 'node' | 'chromium' = 'node'
+
+/**
+ * Rota node/axios, com retry e backoff: falhas de rede/TLS transitórias costumam passar numa nova
+ * tentativa. Erros definitivos (404, certificado) saem na hora — retentar não muda o resultado.
+ */
+async function downloadViaNodeRoute(url: string, modName: string, headers?: Record<string, string>): Promise<Buffer> {
+  const axios = require('axios')
+  const MAX_ATTEMPTS = 3
+  let lastErr: any
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        headers: headers || undefined,
+        maxRedirects: 5,
+        timeout: 120000,
+        maxContentLength: 512 * 1024 * 1024, // teto de 512MB contra payloads gigantes
+        maxBodyLength: 512 * 1024 * 1024,
+      })
+      return Buffer.from(response.data)
+    } catch (err: any) {
+      lastErr = err
+      logDownloadIssue(`${modName}: tentativa ${attempt}/${MAX_ATTEMPTS} (node/axios) falhou — ${describeDownloadError(err)}`)
+      if (!isRetryableNetworkError(err)) break
+      if (attempt < MAX_ATTEMPTS) await sleep(attempt * 2000 - 1000) // 1s, 3s
+    }
+  }
+  throw lastErr
+}
+
+/** Rota Chromium (net.fetch), com o mesmo retry — aqui a falha transitória também é possível. */
+async function downloadViaChromiumRoute(url: string, modName: string, headers?: Record<string, string>): Promise<Buffer> {
+  const MAX_ATTEMPTS = 3
+  let lastErr: any
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fetchViaChromium(url, headers)
+    } catch (err: any) {
+      lastErr = err
+      logDownloadIssue(`${modName}: tentativa ${attempt}/${MAX_ATTEMPTS} (chromium/net) falhou — ${describeDownloadError(err)}`)
+      if (!isNetworkishError(err)) break
+      if (attempt < MAX_ATTEMPTS) await sleep(attempt * 2000 - 1000) // 1s, 3s
+    }
+  }
+  throw lastErr
 }
 
 /**
@@ -978,44 +1037,34 @@ app.whenReady().then(() => {
       if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
         return { success: false, error: 'URL de download inválida' }
       }
-      const axios = require('axios')
-      // Retry com backoff: falhas de TLS/rede (ex.: BAD_DECRYPT de antivírus inspecionando HTTPS)
-      // costumam ser transitórias e passam numa nova tentativa. Erros definitivos (404, URL inválida)
-      // não são retentados — isRetryableNetworkError filtra. Até 3 tentativas: ~1s, ~3s de espera.
-      const MAX_ATTEMPTS = 3
+      // Ordem das rotas: a preferida primeiro, a outra como plano B. Quando o ambiente do player
+      // quebra uma delas (antivírus interceptando HTTPS derruba o node), a preferência já vem
+      // trocada e os mods seguintes não repetem os ~4s de retry inútil — ver preferredRoute.
+      const [first, second] = preferredRoute === 'chromium'
+        ? [downloadViaChromiumRoute, downloadViaNodeRoute]
+        : [downloadViaNodeRoute, downloadViaChromiumRoute]
+
       let buf: Buffer | undefined
       let lastErr: any
-      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        try {
-          const response = await axios.get(url, {
-            responseType: 'arraybuffer',
-            headers: headers || undefined,
-            maxRedirects: 5,
-            timeout: 120000,
-            maxContentLength: 512 * 1024 * 1024, // teto de 512MB contra payloads gigantes
-            maxBodyLength: 512 * 1024 * 1024,
-          })
-          buf = Buffer.from(response.data)
-          break
-        } catch (err: any) {
-          lastErr = err
-          logDownloadIssue(`${modName}: tentativa ${attempt}/${MAX_ATTEMPTS} (node/axios) falhou — ${describeDownloadError(err)}`)
-          if (!isRetryableNetworkError(err)) break // 404, integridade, cert: retentar não muda nada
-          if (attempt < MAX_ATTEMPTS) await sleep(attempt * 2000 - 1000) // 1s, 3s
-        }
-      }
-
-      // Plano B: refaz pelo Chromium, que confia na loja de certificados do Windows e usa o proxy
-      // do SO. Cobre o caso em que o antivírus/proxy intercepta HTTPS — o navegador do player baixa
-      // normal e só o launcher falha. Só vale para falhas de TRANSPORTE (404 continua sendo 404).
-      if (!buf && isNetworkishError(lastErr)) {
-        try {
-          buf = await fetchViaChromium(url, headers)
-          logDownloadIssue(`${modName}: recuperado pelo fallback do Chromium após falha do node (${describeDownloadError(lastErr)})`)
-        } catch (err: any) {
-          logDownloadIssue(`${modName}: fallback do Chromium também falhou — ${describeDownloadError(err)}`)
-          // Reporta o erro mais informativo dos dois: o do Chromium costuma trazer ERR_* do net.
-          lastErr = err?.response?.status ? err : lastErr
+      try {
+        buf = await first(url, modName, headers)
+      } catch (err: any) {
+        lastErr = err
+        // Plano B só para falha de TRANSPORTE: 404 é 404 pelas duas rotas, trocar não ajuda.
+        if (isNetworkishError(err)) {
+          try {
+            buf = await second(url, modName, headers)
+            // Deu certo pela outra rota: a preferida está quebrada NESTE ambiente. Fixa a troca
+            // para o resto da sessão — o próximo mod já começa pela que funciona.
+            const winner = first === downloadViaNodeRoute ? 'chromium' : 'node'
+            if (preferredRoute !== winner) {
+              preferredRoute = winner
+              logDownloadIssue(`rota de download trocada para "${winner}" pelo resto da sessão (a anterior falhou em ${modName})`)
+            }
+          } catch (err2: any) {
+            // Reporta o erro mais informativo dos dois: um HTTP status diz mais que um socket morto.
+            lastErr = err2?.response?.status ? err2 : err
+          }
         }
       }
 
