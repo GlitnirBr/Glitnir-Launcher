@@ -4,9 +4,19 @@ Launcher oficial do servidor Valheim Glitnir.
 
 ## Download
 
-**[Baixar Glitnir Launcher](https://github.com/GlitnirBr/Glitnir-Launcher/releases/latest)** (Windows)
+**[Baixar Glitnir Launcher](https://github.com/GlitnirBr/Glitnir-Launcher/releases/latest)** — Windows e Linux
 
-Acesse a página de Releases e baixe o arquivo `.exe` mais recente.
+| Sistema | Arquivo | Observação |
+|---|---|---|
+| Windows | `GlitnirLauncher-Setup-<versão>.exe` | Instalador NSIS, com atualização automática |
+| Linux | `GlitnirLauncher-<versão>-x86_64.AppImage` | Recomendado. `chmod +x` e execute; tem atualização automática |
+| Linux (Debian/Ubuntu) | `GlitnirLauncher-<versão>-amd64.deb` | `sudo apt install ./arquivo.deb`. Sem atualização automática — baixe a versão nova quando sair |
+
+> **Linux:** deixe a Steam aberta antes de jogar no modo modado. O launcher executa o
+> `valheim.x86_64` direto (com o doorstop via `LD_PRELOAD`) — é o único jeito de os mods
+> carregarem, porque `steam -applaunch` não repassa variáveis de ambiente. Se o seu Valheim
+> estiver instalado na versão Windows (Proton), o launcher avisa a opção de inicialização
+> que falta configurar uma vez na Steam.
 
 ---
 
@@ -33,23 +43,32 @@ npm install
 npm run dev
 ```
 
-### Build local (.exe)
+### Build local
 
 ```bash
 npm run build
-# Gera release/Glitnir Launcher Setup.exe
+# No Windows: release/GlitnirLauncher-Setup-<versão>.exe
+# No Linux:   release/GlitnirLauncher-<versão>-x86_64.AppImage + ...-amd64.deb
 ```
+
+O electron-builder compila para o SO onde ele roda. Os ícones do Linux ficam em
+`build/icons/` (PNGs de 16 a 1024 px) — o electron-builder não redimensiona um PNG
+único, então esses arquivos são versionados no repositório.
 
 ### Build via GitHub Actions
 
-O projeto compila automaticamente quando você cria uma tag:
+O projeto compila Windows **e** Linux automaticamente quando você cria uma tag:
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-O `.exe` será publicado automaticamente na página de Releases.
+O `release.yml` roda os dois builds em paralelo (`windows-latest` + `ubuntu-22.04`) e,
+quando ambos terminam, publica tudo numa release só — instalador `.exe`, `.AppImage`,
+`.deb` e os manifestos `latest.yml` / `latest-linux.yml` do auto-updater.
+
+O `build.yml` é só verificação manual (aba Actions → *Build* → *Run workflow*) e não publica nada.
 
 ---
 
@@ -99,12 +118,33 @@ Exemplo de `modpack.json`:
 
 O launcher cria um perfil isolado em:
 ```
-%APPDATA%/GlitnirLauncher/profiles/Glitnir/BepInEx/
+Windows: %APPDATA%/GlitnirLauncher/profiles/Glitnir/BepInEx/
+Linux:   ~/.config/GlitnirLauncher/profiles/Glitnir/BepInEx/
 ```
 
-E lança o Valheim passando o BepInEx do perfil como argumento:
+E lança o Valheim apontando o doorstop para o BepInEx do perfil. Como isso é feito depende
+da plataforma, porque o doorstop é injetado de formas diferentes:
+
+**Windows** — proxy `winhttp.dll` na pasta do jogo, launch pela Steam com os args do doorstop:
 ```
-valheim.exe --doorstop-enable true --doorstop-target <perfil>/BepInEx/core/BepInEx.dll
+Steam.exe -applaunch 892970 --doorstop-enabled true --doorstop-target-assembly <perfil>/BepInEx/core/BepInEx.Preloader.dll
 ```
 
-Isso garante que a instalação original do Valheim nunca é modificada.
+**Linux (Valheim nativo)** — `libdoorstop_x64.so` via `LD_PRELOAD`, executando o binário direto:
+```
+LD_LIBRARY_PATH=<perfil>/doorstop_libs LD_PRELOAD=libdoorstop_x64.so \
+DOORSTOP_ENABLED=1 DOORSTOP_TARGET_ASSEMBLY=<perfil>/BepInEx/core/BepInEx.Preloader.dll \
+SteamAppId=892970 ./valheim.x86_64
+```
+Não dá para usar `steam -applaunch` aqui: ele só manda um pedido ao cliente da Steam já
+rodando, e o jogo nasce herdando o ambiente *dele* — as variáveis do doorstop nunca chegariam.
+Por isso o cliente da Steam precisa estar aberto (o Valheim autentica pelo Steamworks) e o
+`SteamAppId` é obrigatório, senão o jogo se relança pela Steam e perde o `LD_PRELOAD`.
+
+**Linux (Valheim versão Windows / Proton)** — o doorstop é o `winhttp.dll` dentro do Wine, e o
+Wine só carrega a nossa dll no lugar da builtin com `WINEDLLOVERRIDES="winhttp=n,b" %command%`
+nas opções de inicialização da Steam. Isso é configuração por jogo do usuário, então o
+launcher lança o jogo e avisa o que falta.
+
+Nos três casos a instalação original do Valheim nunca é modificada — o BepInEx e os mods
+ficam no perfil, fora da pasta do jogo.

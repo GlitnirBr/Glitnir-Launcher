@@ -48,6 +48,7 @@ export default function App() {
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [launchError, setLaunchError] = useState('')
+  const [launchNotice, setLaunchNotice] = useState('')
 
   const [serverOnline, setServerOnline] = useState(false)
   const [serverPlayers, setServerPlayers] = useState(0)
@@ -532,6 +533,10 @@ export default function App() {
       })
       if (result && !result.success) {
         setLaunchError(result.error || 'Erro ao iniciar o jogo.')
+      } else if (result?.warning) {
+        // Jogo subiu, mas falta algo do lado do jogador (ex.: opções de inicialização do
+        // Proton no Linux). Mostra no mesmo overlay, com título de aviso.
+        setLaunchNotice(result.warning)
       }
     } catch (err: any) {
       setLaunchError(err.message || 'Erro ao instalar mods antes de iniciar.')
@@ -572,12 +577,16 @@ export default function App() {
 
   return (
     <>
-      {launchError && (
-        <div className="launch-error-overlay" onClick={() => setLaunchError('')}>
+      {(launchError || launchNotice) && (
+        <div
+          className="launch-error-overlay"
+          onClick={() => { setLaunchError(''); setLaunchNotice('') }}
+        >
           <div className="launch-error-box" onClick={e => e.stopPropagation()}>
-            <strong>Erro ao iniciar</strong>
-            <p>{launchError}</p>
-            <button onClick={() => setLaunchError('')}>Fechar</button>
+            <strong>{launchError ? 'Erro ao iniciar' : 'Atenção'}</strong>
+            {/* pre-wrap: o aviso do Proton tem quebras de linha e a linha de opções de inicialização */}
+            <p style={{ whiteSpace: 'pre-wrap' }}>{launchError || launchNotice}</p>
+            <button onClick={() => { setLaunchError(''); setLaunchNotice('') }}>Fechar</button>
           </div>
         </div>
       )}

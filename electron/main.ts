@@ -741,7 +741,69 @@ function writeAppliedConfigs(profile: string, rec: Record<string, string>) {
   fs.writeFileSync(f, JSON.stringify(rec))
 }
 
+const VALHEIM_APPID = '892970'
+
+/**
+ * Executável do jogo na pasta do Valheim.
+ *  - `native`  → build Linux do Valheim (valheim.x86_64). Doorstop injeta por LD_PRELOAD.
+ *  - `windows` → valheim.exe (Windows, ou depot Windows rodando por Proton no Linux).
+ *    Doorstop injeta pelo proxy winhttp.dll.
+ * No Linux o nativo tem prioridade: quem tem os dois depots instalados normalmente joga o nativo.
+ */
+function findGameExecutable(valheimPath: string): { path: string; kind: 'native' | 'windows' } | null {
+  if (process.platform !== 'win32') {
+    const native = path.join(valheimPath, 'valheim.x86_64')
+    if (fs.existsSync(native)) return { path: native, kind: 'native' }
+  }
+  const win = path.join(valheimPath, 'valheim.exe')
+  if (fs.existsSync(win)) return { path: win, kind: 'windows' }
+  return null
+}
+
+/** Raízes de instalação da Steam no Linux (pacote nativo, flatpak e snap). */
+function linuxSteamRoots(): string[] {
+  const home = os.homedir()
+  return [
+    path.join(home, '.steam', 'steam'),
+    path.join(home, '.steam', 'root'),
+    path.join(home, '.local', 'share', 'Steam'),
+    path.join(home, '.var', 'app', 'com.valvesoftware.Steam', '.local', 'share', 'Steam'),
+    path.join(home, 'snap', 'steam', 'common', '.local', 'share', 'Steam'),
+  ]
+}
+
+/**
+ * Bibliotecas da Steam no Linux: as raízes conhecidas + as pastas extras declaradas no
+ * libraryfolders.vdf. Sem ler o vdf, quem instalou o Valheim num HD/SSD secundário não é detectado.
+ */
+function linuxSteamLibraries(): string[] {
+  const out = new Set<string>()
+  for (const root of linuxSteamRoots()) {
+    if (!fs.existsSync(root)) continue
+    out.add(root)
+    const vdfs = [
+      path.join(root, 'steamapps', 'libraryfolders.vdf'),
+      path.join(root, 'config', 'libraryfolders.vdf'),
+    ]
+    for (const vdf of vdfs) {
+      try {
+        const txt = fs.readFileSync(vdf, 'utf8')
+        // Formato atual: "path" "<dir>". Formato antigo: "1" "<dir>".
+        for (const m of txt.matchAll(/"(?:path|\d+)"\s*"([^"]+)"/g)) out.add(m[1])
+      } catch { /* essa raiz não tem vdf */ }
+    }
+  }
+  return [...out]
+}
+
 function autoDetectValheim(): string {
+  if (process.platform === 'linux') {
+    for (const lib of linuxSteamLibraries()) {
+      const p = path.join(lib, 'steamapps', 'common', 'Valheim')
+      if (findGameExecutable(p)) return p
+    }
+    return ''
+  }
   const possiblePaths = [
     'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Valheim',
     'C:\\Program Files\\Steam\\steamapps\\common\\Valheim',
@@ -800,6 +862,90 @@ function findSteamExe(valheimPath: string): string | null {
     if (fs.existsSync(p)) return p
   }
   return null
+}
+
+/** Comando que abre a Steam no Linux: binário nativo, flatpak ou snap. */
+function findSteamLauncherLinux(): { cmd: string; args: string[] } | null {
+  const fixed = [
+    '/usr/bin/steam',
+    '/usr/games/steam',
+    '/usr/local/bin/steam',
+    path.join(os.homedir(), '.local', 'bin', 'steam'),
+    '/snap/bin/steam',
+  ]
+  for (const p of fixed) {
+    if (fs.existsSync(p)) return { cmd: p, args: [] }
+  }
+  try {
+    const hit = execFileSync('which', ['steam'], { encoding: 'utf8' }).trim()
+    if (hit) return { cmd: hit, args: [] }
+  } catch { /* sem steam no PATH */ }
+  try {
+    execFileSync('flatpak', ['info', 'com.valvesoftware.Steam'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return { cmd: 'flatpak', args: ['run', 'com.valvesoftware.Steam'] }
+  } catch { /* sem flatpak da Steam */ }
+  return null
+}
+
+/**
+ * O cliente da Steam está aberto? No modo modado a gente executa o valheim.x86_64 direto
+ * (só assim as variáveis do doorstop chegam ao processo do jogo — ver game:launch), e aí o
+ * Steamworks do Valheim precisa de um cliente já rodando para autenticar.
+ */
+function isSteamRunningLinux(): boolean {
+  const home = os.homedir()
+  const pidFiles = [
+    path.join(home, '.steam', 'steam.pid'),
+    path.join(home, '.var', 'app', 'com.valvesoftware.Steam', '.steam', 'steam.pid'),
+    path.join(home, 'snap', 'steam', 'common', '.steam', 'steam.pid'),
+  ]
+  for (const f of pidFiles) {
+    try {
+      const pid = parseInt(fs.readFileSync(f, 'utf8').trim(), 10)
+      if (pid > 0 && fs.existsSync(`/proc/${pid}`)) return true
+    } catch { /* sem pid file: cai na varredura do /proc */ }
+  }
+  try {
+    for (const entry of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(entry)) continue
+      try {
+        if (fs.readFileSync(`/proc/${entry}/comm`, 'utf8').trim() === 'steam') return true
+      } catch { /* processo morreu no meio da varredura */ }
+    }
+  } catch { /* sem /proc (container?) */ }
+  return false
+}
+
+/** libdoorstop_x64.so do perfil — é o doorstop do Linux (v4), equivalente ao winhttp.dll. */
+function findDoorstopLibLinux(profileRoot: string): string | null {
+  const dir = path.join(profileRoot, 'doorstop_libs')
+  if (!fs.existsSync(dir)) return null
+  const files = fs.readdirSync(dir)
+  const preferred = 'libdoorstop_x64.so'
+  if (files.includes(preferred)) return path.join(dir, preferred)
+  const any = files.find(f => /^libdoorstop.*\.so$/i.test(f))
+  return any ? path.join(dir, any) : null
+}
+
+/**
+ * Caminho Linux → caminho Windows para o Wine/Proton. O prefixo do Proton mapeia Z:\ para /,
+ * então /home/user/x vira Z:\home\user\x. Usado só no caso Proton (depot Windows no Linux),
+ * onde o doorstop que roda é o winhttp.dll e ele só entende caminho estilo Windows.
+ */
+function toWinePath(p: string): string {
+  return 'Z:' + path.resolve(p).replace(/\//g, '\\')
+}
+
+/** Garante o bit de execução no binário do jogo (a Steam normalmente já deixa). */
+function ensureExecutable(file: string) {
+  try {
+    fs.accessSync(file, fs.constants.X_OK)
+  } catch {
+    try { fs.chmodSync(file, 0o755) } catch { /* sem permissão: o spawn falha com EACCES */ }
+  }
 }
 
 function loadConfig() {
@@ -909,8 +1055,13 @@ app.whenReady().then(() => {
 
   const win = createWindow()
 
-  // Auto-updater — only runs in packaged builds
-  if (app.isPackaged) {
+  // Auto-updater — only runs in packaged builds.
+  // No Linux, só o AppImage suporta atualização in-place (o electron-updater identifica o
+  // AppImage pela env APPIMAGE). Num .deb o updater sempre falha e o player veria a barra de
+  // erro em toda abertura; nesse caso a atualização é pelo gerenciador de pacotes/download novo.
+  const updaterSupported = process.platform !== 'linux' || !!process.env.APPIMAGE
+
+  if (app.isPackaged && updaterSupported) {
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
 
@@ -941,11 +1092,11 @@ app.whenReady().then(() => {
   }
 
   ipcMain.handle('updater:check', () => {
-    if (app.isPackaged) autoUpdater.checkForUpdates().catch(() => {})
+    if (app.isPackaged && updaterSupported) autoUpdater.checkForUpdates().catch(() => {})
   })
 
   ipcMain.handle('updater:install', () => {
-    if (app.isPackaged) autoUpdater.quitAndInstall()
+    if (app.isPackaged && updaterSupported) autoUpdater.quitAndInstall()
   })
 
   ipcMain.on('window:minimize', () => win.minimize())
@@ -1428,29 +1579,63 @@ app.whenReady().then(() => {
 
   ipcMain.handle('game:launch', async (_e, { valheimPath, mode, profile }) => {
     try {
-      const exe = path.join(valheimPath, 'valheim.exe')
-      if (!fs.existsSync(exe)) {
-        return { success: false, error: 'valheim.exe não encontrado no caminho configurado.' }
+      const isLinux = process.platform === 'linux'
+      const game = findGameExecutable(valheimPath)
+      if (!game) {
+        return {
+          success: false,
+          error: isLinux
+            ? 'Nem valheim.x86_64 nem valheim.exe foram encontrados no caminho configurado.'
+            : 'valheim.exe não encontrado no caminho configurado.',
+        }
       }
+      const exe = game.path
+
       if (mode === 'vanilla') {
         // Um launch modado anterior deixa o proxy do doorstop na pasta do jogo
         // (winhttp.dll + doorstop_config.ini + doorstop_libs/). Esse proxy é carregado
         // pelo Valheim em QUALQUER inicialização — inclusive rodando valheim.exe direto —
         // e injeta o BepInEx/mods do perfil. Sem removê-lo, o "vanilla" sobe modado.
         // Removemos os artefatos do doorstop antes de lançar (best-effort: ignora se em uso).
-        const doorstopArtifacts = [
-          path.join(valheimPath, 'winhttp.dll'),
-          path.join(valheimPath, 'doorstop_config.ini'),
-        ]
-        for (const p of doorstopArtifacts) {
-          try { if (fs.existsSync(p)) fs.rmSync(p, { force: true }) } catch { /* em uso? ignora */ }
+        // Só vale para o executável Windows: no build nativo de Linux o doorstop entra por
+        // variável de ambiente (LD_PRELOAD), então não sobra nada na pasta do jogo.
+        if (game.kind === 'windows') {
+          const doorstopArtifacts = [
+            path.join(valheimPath, 'winhttp.dll'),
+            path.join(valheimPath, 'doorstop_config.ini'),
+          ]
+          for (const p of doorstopArtifacts) {
+            try { if (fs.existsSync(p)) fs.rmSync(p, { force: true }) } catch { /* em uso? ignora */ }
+          }
+          try {
+            const libs = path.join(valheimPath, 'doorstop_libs')
+            if (fs.existsSync(libs)) fs.rmSync(libs, { recursive: true, force: true })
+          } catch { /* em uso? ignora */ }
         }
-        try {
-          const libs = path.join(valheimPath, 'doorstop_libs')
-          if (fs.existsSync(libs)) fs.rmSync(libs, { recursive: true, force: true })
-        } catch { /* em uso? ignora */ }
 
-        spawn(exe, [], { detached: true, stdio: 'ignore', cwd: valheimPath }).unref()
+        if (isLinux) {
+          // Vanilla não precisa de variável nenhuma, então dá para lançar pela Steam
+          // (mantém overlay e contagem de horas). Sem a Steam localizada, roda direto.
+          const steam = findSteamLauncherLinux()
+          if (steam) {
+            console.log('[launch] vanilla via Steam:', steam.cmd, '-applaunch', VALHEIM_APPID)
+            spawn(steam.cmd, [...steam.args, '-applaunch', VALHEIM_APPID], {
+              detached: true,
+              stdio: 'ignore',
+            }).unref()
+          } else {
+            ensureExecutable(exe)
+            console.log('[launch] vanilla direto:', exe)
+            spawn(exe, [], {
+              detached: true,
+              stdio: 'ignore',
+              cwd: valheimPath,
+              env: { ...process.env, SteamAppId: VALHEIM_APPID, SteamGameId: VALHEIM_APPID },
+            }).unref()
+          }
+        } else {
+          spawn(exe, [], { detached: true, stdio: 'ignore', cwd: valheimPath }).unref()
+        }
       } else {
         const profileRoot = profileDir(profile)
 
@@ -1468,6 +1653,64 @@ app.whenReady().then(() => {
         const preloaderSrc = findPreloaderDll(coreDir)
         if (!preloaderSrc) {
           return { success: false, error: `BepInEx.Preloader.dll não encontrado em ${coreDir} — Certifique-se de que o BepInExPack está no modpack e reinstale os mods.` }
+        }
+
+        // ── Linux nativo (valheim.x86_64) ────────────────────────────────────────────────
+        // Aqui o doorstop não é o winhttp.dll: é o libdoorstop_x64.so injetado por LD_PRELOAD,
+        // e toda a configuração vai por variável de ambiente (contrato do doorstop v4, o mesmo
+        // que o start_game_bepinex.sh do BepInExPack usa). Nada é copiado para a pasta do jogo.
+        //
+        // Por isso NÃO lançamos com `steam -applaunch` no modo modado: o -applaunch só manda um
+        // pedido para o cliente da Steam já rodando, e o jogo nasce como filho DELE — herdando o
+        // ambiente do cliente, não o nosso. As variáveis do doorstop nunca chegariam e o jogo
+        // subiria vanilla. Então executamos o binário direto, com o ambiente montado aqui.
+        if (isLinux && game.kind === 'native') {
+          const doorstopLib = findDoorstopLibLinux(profileRoot)
+          if (!doorstopLib) {
+            return {
+              success: false,
+              error: 'libdoorstop_x64.so não encontrado no perfil. Certifique-se de que o BepInExPack está no modpack e reinstale os mods.',
+            }
+          }
+          // O Valheim autentica pelo Steamworks; rodando o binário direto, o cliente da Steam
+          // precisa já estar aberto para o SteamAPI conectar nele.
+          if (!isSteamRunningLinux()) {
+            return {
+              success: false,
+              error: 'Abra a Steam antes de iniciar no modo modado. O launcher executa o Valheim direto (é o único jeito de os mods carregarem no Linux) e o jogo precisa do cliente da Steam aberto para autenticar.',
+            }
+          }
+
+          const libDir = path.dirname(doorstopLib)
+          const env: Record<string, string> = {
+            ...(process.env as Record<string, string>),
+            DOORSTOP_ENABLED: '1',
+            DOORSTOP_TARGET_ASSEMBLY: preloaderSrc,
+            DOORSTOP_IGNORE_DISABLED_ENV: '0',
+            DOORSTOP_BOOT_CONFIG_OVERRIDE: '',
+            DOORSTOP_MONO_DLL_SEARCH_PATH_OVERRIDE: '',
+            DOORSTOP_MONO_DEBUG_ENABLED: '0',
+            DOORSTOP_MONO_DEBUG_ADDRESS: '127.0.0.1:10000',
+            DOORSTOP_MONO_DEBUG_SUSPEND: '0',
+            // Grava o output_log.txt do Unity na pasta do jogo (o mods:openLog já procura lá).
+            // É o equivalente ao redirect_output_log do .ini no caminho Windows.
+            DOORSTOP_REDIRECT_OUTPUT_LOG: '1',
+            // LD_PRELOAD leva só o NOME da lib; quem resolve o caminho é o LD_LIBRARY_PATH.
+            LD_LIBRARY_PATH: [libDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':'),
+            LD_PRELOAD: [path.basename(doorstopLib), process.env.LD_PRELOAD].filter(Boolean).join(':'),
+            // Sem SteamAppId o Valheim chama RestartAppIfNecessary e se relança PELA Steam —
+            // e a instância relançada perde o LD_PRELOAD, ou seja, abre vanilla.
+            SteamAppId: VALHEIM_APPID,
+            SteamGameId: VALHEIM_APPID,
+          }
+
+          ensureExecutable(exe)
+          console.log('[launch] linux nativo:', exe)
+          console.log('[launch] doorstop lib:', doorstopLib)
+          console.log('[launch] preloader (perfil):', preloaderSrc)
+          spawn(exe, [], { detached: true, stdio: 'ignore', cwd: valheimPath, env }).unref()
+          win.minimize()
+          return { success: true }
         }
 
         function tryCopy(src: string, dest: string) {
@@ -1499,6 +1742,10 @@ app.whenReady().then(() => {
           try { fs.rmSync(gameBepinex, { recursive: true, force: true }) } catch { /* em uso? ignora */ }
         }
 
+        // Caminho do Preloader como o doorstop que vai rodar entende: no Linux quem carrega o
+        // winhttp.dll é o Wine/Proton, e ele precisa de caminho estilo Windows (Z:\...).
+        const doorstopTarget = isLinux ? toWinePath(preloaderSrc) : preloaderSrc
+
         // doorstop_config.ini apontando para o Preloader do PERFIL (caminho absoluto),
         // compatível com doorstop v3 e v4. redirect_output_log grava output_log.txt na pasta do
         // jogo (captura crashes antes do logger do BepInEx subir).
@@ -1507,14 +1754,14 @@ app.whenReady().then(() => {
         const doorstopIni = [
           '[General]',
           'enabled = true',
-          `target_assembly = ${preloaderSrc}`,
+          `target_assembly = ${doorstopTarget}`,
           'redirect_output_log = true',
           'boot_config_override =',
           'ignore_disable_switch = false',
           '',
           '[UnityDoorstop]',
           'enabled=true',
-          `targetAssembly=${preloaderSrc}`,
+          `targetAssembly=${doorstopTarget}`,
           'redirect_output_log=true',
           'ignore_disable_switch=false',
           '',
@@ -1532,12 +1779,38 @@ app.whenReady().then(() => {
         // vanilla, sem terminal). Lançar pela Steam evita o relançamento e o argumento trafega
         // em UTF-16 (Unicode-safe), sem depender do doorstop_config.ini (que fica de fallback).
         // O proxy winhttp.dll continua obrigatório na pasta do jogo (copiado acima).
-        const VALHEIM_APPID = '892970'
         // doorstop v4 usa doorstop_libs/ + flag --doorstop-enabled; v3 usa --doorstop-enable.
         const hasDoorstopLibs = fs.existsSync(path.join(profileRoot, 'doorstop_libs'))
         const doorstopArgs = hasDoorstopLibs
-          ? ['--doorstop-enabled', 'true', '--doorstop-target-assembly', preloaderSrc]
-          : ['--doorstop-enable', 'true', '--doorstop-target-assembly', preloaderSrc, '--doorstop-target', preloaderSrc]
+          ? ['--doorstop-enabled', 'true', '--doorstop-target-assembly', doorstopTarget]
+          : ['--doorstop-enable', 'true', '--doorstop-target-assembly', doorstopTarget, '--doorstop-target', doorstopTarget]
+
+        // ── Linux com o depot Windows (Proton) ───────────────────────────────────────────
+        // O doorstop aqui é o winhttp.dll rodando dentro do Wine, e o Wine só carrega a nossa
+        // dll no lugar da builtin dele se o jogo subir com WINEDLLOVERRIDES. Isso mora nas
+        // opções de inicialização da Steam (config por jogo, do usuário) — o launcher não tem
+        // como injetar, então lançamos e avisamos o que falta configurar uma vez.
+        if (isLinux) {
+          const steam = findSteamLauncherLinux()
+          if (!steam) {
+            return { success: false, error: 'Steam não encontrada. Instale/abra a Steam para iniciar o Valheim no modo modado.' }
+          }
+          console.log('[launch] proton via Steam:', steam.cmd, '-applaunch', VALHEIM_APPID, doorstopArgs.join(' '))
+          spawn(steam.cmd, [...steam.args, '-applaunch', VALHEIM_APPID, ...doorstopArgs], {
+            detached: true,
+            stdio: 'ignore',
+          }).unref()
+          win.minimize()
+          return {
+            success: true,
+            warning:
+              'Seu Valheim está instalado na versão Windows (roda por Proton). Para os mods carregarem, ' +
+              'abra as Propriedades do Valheim na Steam e cole isto em OPÇÕES DE INICIALIZAÇÃO:\n\n' +
+              'WINEDLLOVERRIDES="winhttp=n,b" %command%\n\n' +
+              'É uma vez só. Alternativa: nas Propriedades → Compatibilidade, desmarque a camada de ' +
+              'compatibilidade para a Steam baixar a versão nativa de Linux — aí o launcher cuida de tudo sozinho.',
+          }
+        }
 
         const steamExe = findSteamExe(valheimPath)
         if (steamExe) {

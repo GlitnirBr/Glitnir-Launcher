@@ -10,7 +10,27 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+            # .exe (instalador NSIS) + blockmap (update delta) + latest.yml (auto-updater)
+            artifacts: |
+              release/*.exe
+              release/*.blockmap
+              release/latest.yml
+          - os: ubuntu-22.04
+            name: linux
+            # AppImage (auto-updater funciona) + .deb (Debian/Ubuntu, sem auto-update).
+            # Não há *.blockmap aqui: no AppImage o blockmap vai embutido no próprio arquivo.
+            artifacts: |
+              release/*.AppImage
+              release/*.deb
+              release/latest-linux.yml
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -21,12 +41,8 @@ jobs:
           cache: 'npm'
 
       - name: Sincronizar versão com a tag
-        run: |
-          $tag = "${{ github.ref_name }}" -replace '^v', ''
-          $pkg = Get-Content package.json | ConvertFrom-Json
-          $pkg.version = $tag
-          $pkg | ConvertTo-Json -Depth 10 | Set-Content package.json
-          Write-Host "Versão atualizada para $tag"
+        shell: bash
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
 
       - name: Instalar dependências
         run: npm ci
@@ -34,22 +50,38 @@ jobs:
       - name: Build
         run: npm run build -- --publish never
 
+      - name: Subir artefatos do build
+        uses: actions/upload-artifact@v4
+        with:
+          name: glitnir-launcher-${{ matrix.name }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+
+  # Publica tudo de uma vez só, depois que Windows e Linux terminaram. Se cada job criasse
+  # a release em paralelo, os dois disputariam a mesma tag.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar artefatos dos dois builds
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-release
+          merge-multiple: true
+
       - name: Criar release e subir arquivos
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: |
+            Release ${{ github.ref_name }}
+
+            **Windows:** `GlitnirLauncher-Setup-*.exe`
+            **Linux:** `GlitnirLauncher-*-x86_64.AppImage` (recomendado — tem atualização automática) ou `GlitnirLauncher-*-amd64.deb`
+          files: dist-release/**
+          draft: false
+          prerelease: false
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ github.ref_name }}"
-          gh release create $tag --title $tag --notes "Release $tag" || true
-
-          # latest.yml é obrigatório para o auto-updater funcionar
-          gh release upload $tag "release\latest.yml" --clobber
-
-          # .exe installer
-          Get-ChildItem release -Filter "*.exe" | ForEach-Object {
-            gh release upload $tag $_.FullName --clobber
-          }
-
-          # .blockmap é necessário para atualização delta (reduz tamanho do download)
-          Get-ChildItem release -Filter "*.blockmap" | ForEach-Object {
-            gh release upload $tag $_.FullName --clobber
-          }
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

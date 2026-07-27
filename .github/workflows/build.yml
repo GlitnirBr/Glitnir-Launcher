@@ -1,17 +1,26 @@
-name: Build & Release
+name: Build
 
+# Build de verificação manual (Windows + Linux). Não publica release — quem publica é o
+# release.yml, disparado pela tag v*. Rodar os dois na tag criaria releases duplicadas.
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+            artifacts: release/*.exe
+          - os: ubuntu-22.04
+            name: linux
+            artifacts: |
+              release/*.AppImage
+              release/*.deb
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
@@ -27,22 +36,11 @@ jobs:
         run: npm ci
 
       - name: Build app
-        run: npm run build
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build -- --publish never
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: glitnir-launcher-windows
-          path: release/*.exe
-
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: release/*.exe
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: glitnir-launcher-${{ matrix.name }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error

@@ -23,6 +23,27 @@
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true
     },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icons",
+      "category": "Game",
+      "maintainer": "GlitnirBr <glitnirbr@users.noreply.github.com>",
+      "synopsis": "Launcher oficial do servidor Glitnir - Valheim",
+      "artifactName": "GlitnirLauncher-${version}-${arch}.${ext}"
+    },
     "files": [
       "dist/**/*",
       "dist-electron/**/*"

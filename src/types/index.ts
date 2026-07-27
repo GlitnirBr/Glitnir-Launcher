@@ -167,7 +167,8 @@ declare global {
         openLog: (args: { valheimPath: string; profile?: string }) => Promise<{ success: boolean; error?: string }>
       }
       game: {
-        launch: (args: { valheimPath: string; mode: 'vanilla' | 'modded'; profile: string }) => Promise<{ success: boolean; error?: string }>
+        /** `warning`: o jogo subiu, mas falta uma configuração do jogador (ex.: Proton no Linux). */
+        launch: (args: { valheimPath: string; mode: 'vanilla' | 'modded'; profile: string }) => Promise<{ success: boolean; error?: string; warning?: string }>
       }
       shell: {
         openExternal: (url: string) => void
