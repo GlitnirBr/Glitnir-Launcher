@@ -1286,7 +1286,8 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                   style={{ width: '200px' }}
                 />
                 <span className="form-hint">
-                  Exibe status e jogadores na home para todos. Encontre em battlemetrics.com/servers/valheim/<strong>ID</strong>
+                  Opcional, só referência. O status e os jogadores da home vêm da consulta direta ao
+                  IP do servidor (configurado no Painel Admin), não do BattleMetrics.
                 </span>
               </div>
             </div>

@@ -99,12 +99,25 @@ export interface Config {
   modpackBranch?: string
   /** URL raw do news.json (opcional). */
   newsUrl?: string
-  /** Status do servidor exibido na tela inicial. */
-  serverOnline?: boolean
   /** Pasta onde os perfis/mods são instalados. Default: %APPDATA%\GlitnirLauncher\profiles */
   modsPath?: string
   /** Caminho da pasta BepInEx/config do perfil (r2modman ou outro). Usado pelo editor de configs do admin. */
   adminProfilePath?: string
+}
+
+/** Resposta da consulta direta ao servidor (Steam A2S no IP do servidor). */
+export interface ServerStatus {
+  online: boolean
+  players: number
+  maxPlayers: number
+  name?: string
+  version?: string
+  keywords?: string
+  /** Versão do jogo lida das tags do servidor (ex: 0.221.12-ServerCharacters). */
+  gameVersion?: string
+  queryPort?: number
+  ping?: number
+  error?: string
 }
 
 export interface PrivateModDownload {
@@ -172,6 +185,9 @@ declare global {
       }
       thunderstore: {
         fetchAll: () => Promise<any[]>
+      }
+      server: {
+        status: (args: { address: string; timeoutMs?: number }) => Promise<ServerStatus>
       }
       updater: {
         check: () => Promise<void>

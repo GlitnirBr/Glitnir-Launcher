@@ -22,7 +22,10 @@ interface Props {
   serverOnline?: boolean
   serverPlayers?: number
   serverMaxPlayers?: number
-  hasBattlemetrics?: boolean
+  hasServerStatus?: boolean
+  serverChecking?: boolean
+  /** Versão do jogo lida direto do servidor; tem prioridade sobre a publicada à mão. */
+  serverVersion?: string
   serverInfo?: { ip?: string; uptime?: string; version?: string }
   isAdmin?: boolean
   adminToken?: string | null
@@ -58,7 +61,9 @@ export default function HomeView({
   serverOnline = false,
   serverPlayers = 0,
   serverMaxPlayers = 0,
-  hasBattlemetrics = false,
+  hasServerStatus = false,
+  serverChecking = false,
+  serverVersion = '',
   serverInfo,
   isAdmin = false,
   adminToken,
@@ -285,10 +290,12 @@ export default function HomeView({
         <div className="server-status-card">
           <div className="status-card-header">Status do Servidor</div>
           <div className="status-card-body">
-            {hasBattlemetrics ? (
-              <div className={`status-indicator-row ${serverOnline ? 'online' : 'offline'}`}>
+            {hasServerStatus ? (
+              <div className={`status-indicator-row ${serverChecking ? 'checking' : serverOnline ? 'online' : 'offline'}`}>
                 <span className="status-dot" />
-                <span className="status-label">{serverOnline ? 'Online' : 'Offline'}</span>
+                <span className="status-label">
+                  {serverChecking ? 'Verificando' : serverOnline ? 'Online' : 'Offline'}
+                </span>
               </div>
             ) : (
               <div className="status-indicator-row offline">
@@ -310,7 +317,7 @@ export default function HomeView({
               </div>
             )}
 
-            {hasBattlemetrics && (
+            {hasServerStatus && !serverChecking && (
               <div className="status-info-row">
                 <span className="status-info-label">Jogadores</span>
                 <span className="status-info-value">{serverPlayers} / {serverMaxPlayers}</span>
@@ -324,10 +331,10 @@ export default function HomeView({
               </div>
             )}
 
-            {serverInfo?.version && (
+            {(serverVersion || serverInfo?.version) && (
               <div className="status-info-row">
                 <span className="status-info-label">Versão</span>
-                <span className="status-info-value mono">{serverInfo.version}</span>
+                <span className="status-info-value mono">{serverVersion || serverInfo?.version}</span>
               </div>
             )}
           </div>

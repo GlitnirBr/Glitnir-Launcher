@@ -19,7 +19,8 @@ interface Props {
   serverOnline?: boolean
   serverPlayers?: number
   serverMaxPlayers?: number
-  hasBattlemetrics?: boolean
+  hasServerStatus?: boolean
+  serverChecking?: boolean
 }
 
 export default function Layout({
@@ -38,7 +39,8 @@ export default function Layout({
   serverOnline,
   serverPlayers,
   serverMaxPlayers,
-  hasBattlemetrics,
+  hasServerStatus,
+  serverChecking,
 }: Props) {
   return (
     <div className="layout">
@@ -61,7 +63,8 @@ export default function Layout({
           serverOnline={serverOnline}
           serverPlayers={serverPlayers}
           serverMaxPlayers={serverMaxPlayers}
-          hasBattlemetrics={hasBattlemetrics}
+          hasServerStatus={hasServerStatus}
+          serverChecking={serverChecking}
         />
         <main className="layout-main">
           {children}

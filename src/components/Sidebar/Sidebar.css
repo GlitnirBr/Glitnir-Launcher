@@ -253,6 +253,15 @@
 }
 .sidebar-status-row.online { color: var(--accent-green); }
 .sidebar-status-row.offline { color: var(--accent-red); }
+.sidebar-status-row.checking { color: var(--text-muted); }
+.sidebar-status-row.checking .sidebar-status-dot {
+  background: var(--text-muted);
+  animation: sidebar-status-pulse 1.2s ease-in-out infinite;
+}
+@keyframes sidebar-status-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
 
 .sidebar-status-players {
   font-size: 11px;

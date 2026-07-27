@@ -52,7 +52,12 @@ export default function App() {
   const [serverOnline, setServerOnline] = useState(false)
   const [serverPlayers, setServerPlayers] = useState(0)
   const [serverMaxPlayers, setServerMaxPlayers] = useState(0)
-  const [publicBattlemetricsId, setPublicBattlemetricsId] = useState('')
+  /** Versão do jogo reportada pelo próprio servidor na consulta. */
+  const [serverVersion, setServerVersion] = useState('')
+  /** True até a primeira resposta da consulta — evita mostrar "Offline" antes de saber. */
+  const [serverChecking, setServerChecking] = useState(false)
+  /** Endereço consultado, publicado pelo admin; vazio = servidor não configurado. */
+  const serverAddress = (newsData.serverInfo?.ip || '').trim()
 
   const modpacks: ModpackEntry[] = isAdmin
     ? [VANILLA, MAIN, ADMIN_TEST]
@@ -231,58 +236,56 @@ export default function App() {
     }
   }, [config, loadModpack, loadNews])
 
-  // Fetch the public modpack to extract battlemetricsId (backend first, GitHub fallback).
+  // Status do servidor consultado DIRETO no IP (Steam A2S via main process) — nada de
+  // BattleMetrics: os jogadores online refletem o servidor no instante da consulta.
+  // O endereço vem do IP publicado pelo admin (serverInfo.ip do /news).
   useEffect(() => {
-    if (!config) return
-    async function load() {
-      try {
-        let raw: any = null
-        try {
-          raw = await getPublicModpack(config!.backendUrl || undefined)
-        } catch { /* ignore, will try GitHub */ }
-        if (!raw) {
-          raw = await fetchModpackFromUrl(buildModpackRawUrl(config!.modpackRepo, config!.modpackBranch))
-        }
-        const data = normalizeModpack(raw)
-        if (data.battlemetricsId) setPublicBattlemetricsId(data.battlemetricsId)
-      } catch { /* silently ignore */ }
-    }
-    load()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config?.backendUrl, config?.modpackRepo, config?.modpackBranch])
-
-  // Poll BattleMetrics: prefer public modpack ID, fall back to currently loaded modpack.
-  useEffect(() => {
-    const id = publicBattlemetricsId || modpackData?.battlemetricsId || ''
-    if (!id) {
+    const address = serverAddress
+    if (!address) {
+      setServerChecking(false)
       setServerOnline(false)
       setServerPlayers(0)
       setServerMaxPlayers(0)
+      setServerVersion('')
       return
     }
 
+    setServerChecking(true)
     let cancelled = false
 
     async function fetchStatus() {
       try {
-        const res = await fetch(`https://api.battlemetrics.com/servers/${id}`)
-        if (!res.ok || cancelled) return
-        const json = await res.json()
-        const attr = json?.data?.attributes
-        if (!attr || cancelled) return
-        setServerOnline(attr.status === 'online')
-        setServerPlayers(attr.players ?? 0)
-        setServerMaxPlayers(attr.maxPlayers ?? 0)
-      } catch { /* silently ignore */ }
+        const status = await window.glitnir.server.status({ address })
+        if (cancelled) return
+        setServerOnline(status.online)
+        setServerPlayers(status.players ?? 0)
+        setServerMaxPlayers(status.maxPlayers ?? 0)
+        // Só sobrescreve com o que o servidor respondeu; offline mantém a última versão vista.
+        if (status.gameVersion) setServerVersion(status.gameVersion)
+      } catch {
+        if (!cancelled) {
+          setServerOnline(false)
+          setServerPlayers(0)
+        }
+      } finally {
+        if (!cancelled) setServerChecking(false)
+      }
     }
 
     fetchStatus()
-    const interval = setInterval(fetchStatus, 60_000)
+    // 30s: é um único pacote UDP direto no servidor, dá pra ser bem mais frequente que o
+    // polling do BattleMetrics. Igual ao poll de modpack/notícias, launcher escondido não consulta.
+    const interval = setInterval(() => { if (!document.hidden) fetchStatus() }, 30_000)
+    const onWake = () => { if (!document.hidden) fetchStatus() }
+    window.addEventListener('focus', onWake)
+    document.addEventListener('visibilitychange', onWake)
     return () => {
       cancelled = true
       clearInterval(interval)
+      window.removeEventListener('focus', onWake)
+      document.removeEventListener('visibilitychange', onWake)
     }
-  }, [publicBattlemetricsId, modpackData?.battlemetricsId])
+  }, [serverAddress])
 
   async function handleSaveConfig(updates: Partial<Config>) {
     // When modsPath changes, the old installed-mods metadata points to the wrong directory.
@@ -593,7 +596,8 @@ export default function App() {
         serverOnline={serverOnline}
         serverPlayers={serverPlayers}
         serverMaxPlayers={serverMaxPlayers}
-        hasBattlemetrics={!!(publicBattlemetricsId || modpackData?.battlemetricsId)}
+        hasServerStatus={!!serverAddress}
+        serverChecking={serverChecking}
       >
         {currentView === 'home' && (
           <HomeView
@@ -603,7 +607,9 @@ export default function App() {
             serverOnline={serverOnline}
             serverPlayers={serverPlayers}
             serverMaxPlayers={serverMaxPlayers}
-            hasBattlemetrics={!!(publicBattlemetricsId || modpackData?.battlemetricsId)}
+            hasServerStatus={!!serverAddress}
+            serverChecking={serverChecking}
+            serverVersion={serverVersion}
             serverInfo={newsData.serverInfo}
             isAdmin={isAdmin}
             adminToken={adminToken}
@@ -649,6 +655,11 @@ export default function App() {
             adminToken={adminToken}
             onSave={handleSaveConfig}
             serverInfo={newsData.serverInfo}
+            serverOnline={serverOnline}
+            serverPlayers={serverPlayers}
+            serverMaxPlayers={serverMaxPlayers}
+            serverChecking={serverChecking}
+            serverVersion={serverVersion}
             onPublishNews={handlePublishNews}
           />
         )}

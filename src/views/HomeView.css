@@ -140,6 +140,17 @@
 .status-indicator-row.online .status-label { color: var(--accent-green); }
 .status-indicator-row.offline .status-label { color: var(--accent-red); }
 
+/* Enquanto a consulta direta ao servidor (A2S) não responde, nem online nem offline. */
+.status-indicator-row.checking .status-dot {
+  background: var(--text-muted);
+  animation: status-pulse 1.2s ease-in-out infinite;
+}
+.status-indicator-row.checking .status-label { color: var(--text-muted); }
+@keyframes status-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
 .status-info-row {
   display: flex;
   align-items: center;

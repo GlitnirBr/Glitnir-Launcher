@@ -5,6 +5,7 @@ import fs from 'fs'
 import os from 'os'
 import crypto from 'crypto'
 import { spawn, execFileSync } from 'child_process'
+import { queryServerStatus, parseServerAddress } from './serverQuery'
 
 const DATA_PATH = path.join(app.getPath('appData'), 'GlitnirLauncher')
 const CONFIG_FILE = path.join(DATA_PATH, 'config.json')
@@ -1749,6 +1750,34 @@ app.whenReady().then(() => {
     if (result.canceled || !result.filePath) return { success: false }
     fs.writeFileSync(result.filePath, content, 'utf-8')
     return { success: true }
+  })
+
+  // Status do servidor consultado direto no IP (Steam A2S/UDP). Fica no main porque o
+  // renderer não faz UDP; consultas para o mesmo endereço são compartilhadas para não
+  // disparar vários pacotes quando sidebar e home pedem ao mesmo tempo.
+  const serverStatusInFlight = new Map<string, Promise<any>>()
+
+  ipcMain.handle('server:status', async (_e, { address, timeoutMs }: { address: string; timeoutMs?: number }) => {
+    const parsed = parseServerAddress(address)
+    if (!parsed) {
+      return { online: false, players: 0, maxPlayers: 0, error: 'endereço do servidor inválido' }
+    }
+    const timeout = Math.min(Math.max(timeoutMs ?? 4000, 500), 10_000)
+    const key = `${parsed.host}:${parsed.port}:${timeout}`
+    const pending = serverStatusInFlight.get(key)
+    if (pending) return pending
+
+    const promise = queryServerStatus(parsed.host, parsed.port, timeout)
+      .catch(err => ({
+        online: false,
+        players: 0,
+        maxPlayers: 0,
+        error: err?.message || 'falha ao consultar o servidor',
+      }))
+      .finally(() => { serverStatusInFlight.delete(key) })
+
+    serverStatusInFlight.set(key, promise)
+    return promise
   })
 
   ipcMain.handle('thunderstore:fetchAll', async () => {

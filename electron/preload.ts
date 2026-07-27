@@ -91,6 +91,11 @@ contextBridge.exposeInMainWorld('glitnir', {
     fetchAll: () => ipcRenderer.invoke('thunderstore:fetchAll'),
   },
 
+  server: {
+    status: (args: { address: string; timeoutMs?: number }) =>
+      ipcRenderer.invoke('server:status', args),
+  },
+
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
     install: () => ipcRenderer.invoke('updater:install'),

@@ -16,7 +16,8 @@ interface Props {
   serverOnline?: boolean
   serverPlayers?: number
   serverMaxPlayers?: number
-  hasBattlemetrics?: boolean
+  hasServerStatus?: boolean
+  serverChecking?: boolean
 }
 
 export default function Sidebar({
@@ -32,7 +33,8 @@ export default function Sidebar({
   serverOnline,
   serverPlayers,
   serverMaxPlayers,
-  hasBattlemetrics,
+  hasServerStatus,
+  serverChecking,
 }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const selectedModpackData = modpacks.find(m => m.id === selectedModpack)
@@ -142,13 +144,15 @@ export default function Sidebar({
           )}
         </button>
 
-        {hasBattlemetrics && (
+        {hasServerStatus && (
           <div className="sidebar-status">
-            <div className={`sidebar-status-row ${serverOnline ? 'online' : 'offline'}`}>
+            <div className={`sidebar-status-row ${serverChecking ? 'checking' : serverOnline ? 'online' : 'offline'}`}>
               <span className="sidebar-status-dot" />
-              <span>Servidores: {serverOnline ? 'Online' : 'Offline'}</span>
+              <span>Servidores: {serverChecking ? 'Verificando...' : serverOnline ? 'Online' : 'Offline'}</span>
             </div>
-            <span className="sidebar-status-players">Jogadores online: {serverPlayers ?? 0}/{serverMaxPlayers ?? 0}</span>
+            {!serverChecking && (
+              <span className="sidebar-status-players">Jogadores online: {serverPlayers ?? 0}/{serverMaxPlayers ?? 0}</span>
+            )}
           </div>
         )}
 
