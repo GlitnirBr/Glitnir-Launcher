@@ -442,8 +442,14 @@ export default function App() {
       // configs cujo conteúdo não mudou E cujo arquivo já existe no disco, então um relaunch
       // sem mudanças não reescreve nada nem rebaixa os configs do R2 (o modpack tem milhares).
       const configs = pack.configs || []
-      window.glitnir.mods.onApplyConfigProgress(({ done, total }) => {
-        setInstallStatus(`Aplicando configs (${done}/${total})...`)
+      window.glitnir.mods.onApplyConfigProgress(({ done, total, filename, stage }) => {
+        // Pacote .zip (texturas): pode ter centenas de MB e levar minutos num único passo —
+        // mostra o nome pra não parecer que travou no mesmo x/y.
+        setInstallStatus(
+          stage === 'zip'
+            ? `Baixando pacote ${filename} (${done}/${total})...`
+            : `Aplicando configs (${done}/${total})...`,
+        )
         setInstallProgress(90 + Math.round((done / Math.max(total, 1)) * 10))
       })
       try {

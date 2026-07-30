@@ -761,6 +761,88 @@ function writeAppliedConfigs(profile: string, rec: Record<string, string>) {
   fs.writeFileSync(f, JSON.stringify(rec))
 }
 
+// ── Pacotes de config em .zip (ex.: texturas) ──────────────────────────────────────
+// Um config com `extract: true` não é um arquivo: é um .zip no R2 cujo CONTEÚDO é
+// extraído dentro do perfil (installPath = pasta destino). Precisa de registro próprio
+// porque um zip vira N arquivos — guardamos a lista pra poder limpar os antigos quando o
+// admin troca o pacote (senão texturas removidas ficariam pra sempre no perfil do player).
+
+type AppliedZip = { hash: string; files: string[] }
+
+const appliedZipsFile = (profile: string) => path.join(profileDir(profile), '.glitnir', 'applied-config-zips.json')
+
+function readAppliedZips(profile: string): Record<string, AppliedZip> {
+  try { return JSON.parse(fs.readFileSync(appliedZipsFile(profile), 'utf-8')) } catch { return {} }
+}
+
+function writeAppliedZips(profile: string, rec: Record<string, AppliedZip>) {
+  const f = appliedZipsFile(profile)
+  fs.mkdirSync(path.dirname(f), { recursive: true })
+  fs.writeFileSync(f, JSON.stringify(rec))
+}
+
+/** Chave de registro de um pacote zip. Dois zips podem extrair na MESMA pasta, então o nome entra na chave. */
+const zipEntryKey = (installPath: string, filename?: string) => `${installPath}|${filename || 'pack.zip'}`
+
+/** Baixa uma URL pra um arquivo temporário em streaming (zip de textura pode ter centenas de MB). */
+async function downloadToTempFile(url: string, hintName: string): Promise<string> {
+  const axios = require('axios')
+  const tempPath = path.join(os.tmpdir(), `glitnir-cfg-${safeName(hintName)}-${Date.now()}.zip`)
+  const res = await axios.get(url, {
+    responseType: 'stream',
+    // Sem timeout de resposta total: o corpo pode levar minutos numa conexão ruim. O axios
+    // já falha se a conexão morrer; o timeout curto aqui cortaria downloads legítimos.
+    timeout: 60000,
+    maxRedirects: 5,
+  })
+  await new Promise<void>((resolve, reject) => {
+    const ws = fs.createWriteStream(tempPath)
+    res.data.pipe(ws)
+    res.data.on('error', reject)
+    ws.on('error', reject)
+    ws.on('finish', () => resolve())
+  })
+  return tempPath
+}
+
+/**
+ * Extrai um zip de config dentro do perfil. Cada entrada é confinada em `destDir`
+ * (entrada com `../` no nome é ignorada — zip slip). Retorna os caminhos extraídos
+ * RELATIVOS à pasta do perfil, pra registrar no manifesto.
+ */
+function extractConfigZip(zipPath: string, destDir: string, profileRoot: string): string[] {
+  const AdmZip = require('adm-zip')
+  const zip = new AdmZip(zipPath)
+  const base = path.resolve(destDir)
+  const written: string[] = []
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue
+    const target = path.resolve(base, entry.entryName)
+    if (target !== base && !target.startsWith(base + path.sep)) continue // zip slip
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, entry.getData())
+    written.push(path.relative(path.resolve(profileRoot), target))
+  }
+  return written
+}
+
+/** Apaga arquivos extraídos por um pacote (e as pastas que ficaram vazias). Best-effort. */
+function removeExtractedFiles(profile: string, files: string[]) {
+  const root = path.resolve(profileDir(profile))
+  const dirs = new Set<string>()
+  for (const rel of files) {
+    const target = path.resolve(root, rel)
+    if (target !== root && !target.startsWith(root + path.sep)) continue
+    try { fs.unlinkSync(target) } catch { /* já não existe */ }
+    dirs.add(path.dirname(target))
+  }
+  // Do mais profundo pro mais raso, pra pastas aninhadas vazias também saírem.
+  for (const dir of [...dirs].sort((a, b) => b.length - a.length)) {
+    if (dir === root || !dir.startsWith(root + path.sep)) continue
+    try { if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir) } catch { /* não vazia / em uso */ }
+  }
+}
+
 const VALHEIM_APPID = '892970'
 
 /**
@@ -1347,6 +1429,121 @@ app.whenReady().then(() => {
     }
   })
 
+  ipcMain.handle('configs:pickZip', async () => {
+    // Escolhe um pacote de configs (.zip — ex.: texturas) SEM lê-lo: zips de textura têm
+    // dezenas/centenas de MB e não cabem via IPC. Mesmo esquema de token opaco do
+    // mods:pickModFile — o renderer nunca vê o caminho absoluto.
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Selecione o pacote de configs (.zip)',
+      filters: [{ name: 'Pacote ZIP', extensions: ['zip'] }],
+      properties: ['openFile'],
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    const filePath = result.filePaths[0]
+    let size: number
+    try { size = fs.statSync(filePath).size } catch { return null }
+    // Valida que é um ZIP legível ANTES de subir dezenas de MB (e conta as entradas
+    // pra o admin conferir na UI que pegou o pacote certo).
+    let entries: number
+    try {
+      const AdmZip = require('adm-zip')
+      entries = new AdmZip(filePath).getEntries().filter((e: any) => !e.isDirectory).length
+    } catch {
+      return { error: 'Arquivo não é um ZIP válido' }
+    }
+    const token = crypto.randomUUID()
+    pickedModFiles.set(token, filePath)
+    return { token, filename: path.basename(filePath), size, entries }
+  })
+
+  ipcMain.handle('configs:uploadZipStream', async (
+    _e,
+    { token, backendUrl, authToken }: { token: string; backendUrl: string; authToken: string },
+  ) => {
+    // Sobe o pacote de configs pro R2 via Worker (multipart, partes de 25MiB), igual ao
+    // upload de mod privado. O /configs/upload comum manda o arquivo TODO em base64 e
+    // não serve pra zip de texturas. O hash sha256 vai junto: o Worker usa os 8 primeiros
+    // chars na key (content-addressed), então trocar o zip muda a URL e o launcher reaplica.
+    const filePath = pickedModFiles.get(token)
+    if (!filePath) return { success: false, error: 'Arquivo não encontrado (selecione de novo)' }
+    if (typeof backendUrl !== 'string' || !/^https?:\/\//i.test(backendUrl)) {
+      return { success: false, error: 'Backend inválido' }
+    }
+    const base = backendUrl.replace(/\/+$/, '')
+    const original = path.basename(filePath)
+    if (!/\.zip$/i.test(original)) return { success: false, error: 'Apenas .zip é aceito aqui' }
+    // O backend exige key simples (^[A-Za-z0-9._-]+\.zip$): troca espaço/acento por `_`.
+    const filename = original.replace(/[^A-Za-z0-9._-]+/g, '_')
+
+    const axios = require('axios')
+    const auth = { Authorization: `Bearer ${authToken}` }
+    let uploadId = ''
+    let sha256 = ''
+    let fd: number | null = null
+    try {
+      const total = fs.statSync(filePath).size
+
+      // sha256 dos bytes, em streaming (não carrega o arquivo na memória).
+      sha256 = await new Promise<string>((resolve, reject) => {
+        const h = crypto.createHash('sha256')
+        const rs = fs.createReadStream(filePath)
+        rs.on('data', chunk => h.update(chunk))
+        rs.on('error', reject)
+        rs.on('end', () => resolve(h.digest('hex')))
+      })
+
+      const created = await axios.post(
+        `${base}/configs/multipart/create`,
+        { filename, sha256 },
+        { headers: auth, timeout: 30000 },
+      )
+      uploadId = created.data?.uploadId
+      if (!uploadId) throw new Error('Backend não devolveu uploadId')
+
+      fd = fs.openSync(filePath, 'r')
+      const parts: { partNumber: number; etag: string }[] = []
+      const buffer = Buffer.allocUnsafe(MOD_UPLOAD_PART_SIZE)
+      let position = 0
+      let partNumber = 0
+      while (position < total) {
+        const bytesRead = fs.readSync(fd, buffer, 0, MOD_UPLOAD_PART_SIZE, position)
+        if (bytesRead <= 0) break
+        partNumber++
+        const q =
+          `filename=${encodeURIComponent(filename)}&sha256=${sha256}` +
+          `&uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`
+        const res = await axios.put(`${base}/configs/multipart/part?${q}`, buffer.subarray(0, bytesRead), {
+          headers: { ...auth, 'Content-Type': 'application/octet-stream' },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+          timeout: 300000,
+        })
+        parts.push({ partNumber, etag: res.data.etag })
+        position += bytesRead
+        try { win.webContents.send('configs:uploadProgress', { filename: original, sent: position, total }) } catch { /* janela pode ter fechado */ }
+      }
+
+      const done = await axios.post(
+        `${base}/configs/multipart/complete`,
+        { filename, sha256, uploadId, parts },
+        { headers: auth, timeout: 60000 },
+      )
+      uploadId = '' // completado — não abortar no finally
+      const url = done.data?.url || `${base}/configs/${sha256.slice(0, 8)}-${filename}`
+      return { success: true, filename: original, url, sha256 }
+    } catch (err: any) {
+      if (uploadId) {
+        try {
+          await axios.post(`${base}/configs/multipart/abort`, { filename, sha256, uploadId }, { headers: auth, timeout: 15000 })
+        } catch { /* best-effort */ }
+      }
+      return { success: false, error: err?.response?.data?.error || err?.message || 'Falha no upload' }
+    } finally {
+      if (fd !== null) { try { fs.closeSync(fd) } catch { /* ignore */ } }
+      pickedModFiles.delete(token)
+    }
+  })
+
   ipcMain.handle('mods:applyConfig', async (_e, { profile, installPath, content }) => {
     try {
       ensureDirs(profile)
@@ -1365,12 +1562,16 @@ app.whenReady().then(() => {
   // Num relaunch sem mudanças, pula tudo instantaneamente — nada é reescrito nem rebaixado.
   ipcMain.handle('mods:applyConfigs', async (
     _e,
-    { profile, configs }: { profile: string; configs: { installPath: string; content: string; filename?: string }[] },
+    { profile, configs }: { profile: string; configs: { installPath: string; content: string; filename?: string; extract?: boolean }[] },
   ) => {
     try {
       ensureDirs(profile)
-      const list = Array.isArray(configs) ? configs : []
-      const total = list.length
+      const all = Array.isArray(configs) ? configs : []
+      // Pacotes .zip (extract: true) seguem um caminho próprio: baixam, extraem e registram
+      // os arquivos gerados. Os demais são arquivo-a-arquivo, como sempre.
+      const list = all.filter(c => !c.extract)
+      const zipPacks = all.filter(c => !!c.extract)
+      const total = all.length
       const applied = readAppliedConfigs(profile)
       const wanted = new Set<string>()
       let done = 0, appliedCount = 0, skipped = 0
@@ -1414,6 +1615,70 @@ app.whenReady().then(() => {
       // como o r2modman — só deixa de rastreá-los).
       for (const k of Object.keys(applied)) if (!wanted.has(k)) delete applied[k]
       writeAppliedConfigs(profile, applied)
+
+      // ── Pacotes .zip: baixa e extrai no perfil ────────────────────────────────────
+      // Um por vez (são grandes) e só quando mudou: a URL do R2 é content-addressed, então
+      // o hash muda quando o admin sobe outro zip. Se algum arquivo extraído tiver sumido do
+      // disco, reextrai (auto-cura, igual aos configs de arquivo único).
+      const zipsApplied = readAppliedZips(profile)
+      const wantedZips = new Set<string>()
+      const profileRoot = profileDir(profile)
+      for (const pack of zipPacks) {
+        const key = zipEntryKey(pack.installPath, pack.filename)
+        wantedZips.add(key)
+        const destDir = resolveConfigTarget(profile, pack.installPath || 'BepInEx/config')
+        const url = (pack.content || '').trim()
+        if (!destDir || !/^https?:\/\//i.test(url)) {
+          failed.push(pack.filename || pack.installPath); done++
+          try { win.webContents.send('mods:applyConfigProgress', { done, total, filename: pack.filename || pack.installPath }) } catch { /* janela fechou */ }
+          continue
+        }
+        const hash = hashConfigEntry(key, url)
+        const prev = zipsApplied[key]
+        if (prev?.hash === hash && prev.files.every(f => fs.existsSync(path.join(profileRoot, f)))) {
+          skipped++; done++
+          try { win.webContents.send('mods:applyConfigProgress', { done, total, filename: pack.filename || pack.installPath }) } catch { /* janela fechou */ }
+          continue
+        }
+        let tempZip = ''
+        try {
+          // Avisa ANTES de baixar: um pacote de texturas pode ter centenas de MB e levar
+          // minutos — sem isso a UI ficaria parada no mesmo "x/y" e pareceria travada.
+          try {
+            win.webContents.send('mods:applyConfigProgress', {
+              done, total, filename: pack.filename || pack.installPath, stage: 'zip',
+            })
+          } catch { /* janela fechou */ }
+          tempZip = await downloadToTempFile(url, pack.filename || 'config-pack')
+          const files = extractConfigZip(tempZip, destDir, profileRoot)
+          // Arquivos da versão ANTERIOR do pacote que não vieram na nova: saem do perfil.
+          if (prev) {
+            const kept = new Set(files)
+            removeExtractedFiles(profile, prev.files.filter(f => !kept.has(f)))
+          }
+          zipsApplied[key] = { hash, files }
+          writeAppliedZips(profile, zipsApplied)
+          appliedCount++
+        } catch {
+          failed.push(pack.filename || pack.installPath)
+        } finally {
+          if (tempZip) { try { fs.unlinkSync(tempZip) } catch { /* ignore */ } }
+          done++
+          try { win.webContents.send('mods:applyConfigProgress', { done, total, filename: pack.filename || pack.installPath }) } catch { /* janela fechou */ }
+        }
+      }
+
+      // Pacote removido do modpack: aqui APAGAMOS os arquivos extraídos (diferente dos configs
+      // de arquivo único, que ficam no disco). Um pacote de texturas tirado do modpack precisa
+      // sair do perfil do player — senão as texturas antigas continuariam valendo pra sempre.
+      let zipsChanged = false
+      for (const k of Object.keys(zipsApplied)) {
+        if (wantedZips.has(k)) continue
+        removeExtractedFiles(profile, zipsApplied[k].files)
+        delete zipsApplied[k]
+        zipsChanged = true
+      }
+      if (zipsChanged) writeAppliedZips(profile, zipsApplied)
 
       return { success: true, total, applied: appliedCount, skipped, failed: failed.length }
     } catch (err: any) {

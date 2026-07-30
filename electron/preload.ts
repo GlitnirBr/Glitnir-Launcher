@@ -36,10 +36,10 @@ contextBridge.exposeInMainWorld('glitnir', {
       ipcRenderer.invoke('mods:setOptionalEnabled', args),
     applyConfig: (args: { profile: string; installPath: string; content: string }) =>
       ipcRenderer.invoke('mods:applyConfig', args),
-    applyConfigs: (args: { profile: string; configs: { installPath: string; content: string; filename?: string }[] }) =>
+    applyConfigs: (args: { profile: string; configs: { installPath: string; content: string; filename?: string; extract?: boolean }[] }) =>
       ipcRenderer.invoke('mods:applyConfigs', args),
-    onApplyConfigProgress: (callback: (data: { done: number; total: number; filename: string }) => void) => {
-      const handler = (_e: Electron.IpcRendererEvent, data: { done: number; total: number; filename: string }) => callback(data)
+    onApplyConfigProgress: (callback: (data: { done: number; total: number; filename: string; stage?: 'zip' }) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, data: { done: number; total: number; filename: string; stage?: 'zip' }) => callback(data)
       ipcRenderer.removeAllListeners('mods:applyConfigProgress')
       ipcRenderer.on('mods:applyConfigProgress', handler)
     },
@@ -64,6 +64,20 @@ contextBridge.exposeInMainWorld('glitnir', {
       ipcRenderer.invoke('mods:pickAndImportR2File'),
     openLog: (args: { valheimPath: string; profile?: string }) =>
       ipcRenderer.invoke('mods:openLog', args),
+  },
+
+  // Pacotes de config em .zip (ex.: texturas). Upload em partes pelo main process — o
+  // renderer nunca toca nos bytes (zip de textura tem dezenas/centenas de MB).
+  configs: {
+    pickZip: () => ipcRenderer.invoke('configs:pickZip'),
+    uploadZipStream: (args: { token: string; backendUrl: string; authToken: string }) =>
+      ipcRenderer.invoke('configs:uploadZipStream', args),
+    onUploadProgress: (callback: (data: { filename: string; sent: number; total: number }) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, data: { filename: string; sent: number; total: number }) => callback(data)
+      ipcRenderer.removeAllListeners('configs:uploadProgress')
+      ipcRenderer.on('configs:uploadProgress', handler)
+    },
+    offUploadProgress: () => ipcRenderer.removeAllListeners('configs:uploadProgress'),
   },
 
   game: {

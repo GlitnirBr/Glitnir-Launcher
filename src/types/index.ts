@@ -54,6 +54,12 @@ export interface ModConfig {
   installPath: string
   /** Conteúdo literal do config OU uma URL http(s) de onde buscar o conteúdo */
   content: string
+  /**
+   * Pacote .zip (ex.: texturas): `content` é a URL do zip no R2 e `installPath` é a PASTA
+   * destino dentro do perfil. Na instalação o launcher baixa o zip e EXTRAI o conteúdo lá
+   * (preservando as subpastas); o .zip em si não fica no perfil do player.
+   */
+  extract?: boolean
 }
 
 export interface Modpack {
@@ -153,8 +159,9 @@ declare global {
         removeProfile: (profile: string) => Promise<{ success: boolean; path?: string; error?: string }>
         setOptionalEnabled: (args: { profile: string; modName: string; enabled: boolean; version?: string }) => Promise<{ success: boolean; moved?: boolean; version?: string; error?: string }>
         applyConfig: (args: { profile: string; installPath: string; content: string }) => Promise<{ success: boolean; error?: string }>
-        applyConfigs: (args: { profile: string; configs: { installPath: string; content: string; filename?: string }[] }) => Promise<{ success: boolean; total?: number; applied?: number; skipped?: number; failed?: number; error?: string }>
-        onApplyConfigProgress: (callback: (data: { done: number; total: number; filename: string }) => void) => void
+        applyConfigs: (args: { profile: string; configs: { installPath: string; content: string; filename?: string; extract?: boolean }[] }) => Promise<{ success: boolean; total?: number; applied?: number; skipped?: number; failed?: number; error?: string }>
+        /** `stage: 'zip'` = começou o download de um pacote .zip (pode demorar; ver ModConfig.extract). */
+        onApplyConfigProgress: (callback: (data: { done: number; total: number; filename: string; stage?: 'zip' }) => void) => void
         offApplyConfigProgress: () => void
         readConfigsFromZip: (args: { url: string }) => Promise<{ success: boolean; configs?: { filename: string; installPath: string; content: string }[]; error?: string }>
         pickAndRead: () => Promise<{ filename: string; content: string; size: number } | null>
@@ -165,6 +172,14 @@ declare global {
         importR2Code: (args: { code: string }) => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content?: string; contentBase64?: string }[]; error?: string }>
         pickAndImportR2File: () => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content?: string; contentBase64?: string }[]; error?: string } | null>
         openLog: (args: { valheimPath: string; profile?: string }) => Promise<{ success: boolean; error?: string }>
+      }
+      /** Pacotes de config em .zip (ex.: texturas): upload em partes feito no main process. */
+      configs: {
+        /** Abre o diálogo do SO. `entries` = arquivos dentro do zip; `error` quando não é um zip válido. */
+        pickZip: () => Promise<{ token: string; filename: string; size: number; entries: number } | { error: string } | null>
+        uploadZipStream: (args: { token: string; backendUrl: string; authToken: string }) => Promise<{ success: boolean; filename?: string; url?: string; sha256?: string; error?: string }>
+        onUploadProgress: (callback: (data: { filename: string; sent: number; total: number }) => void) => void
+        offUploadProgress: () => void
       }
       game: {
         /** `warning`: o jogo subiu, mas falta uma configuração do jogador (ex.: Proton no Linux). */

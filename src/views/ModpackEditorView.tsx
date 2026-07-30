@@ -116,6 +116,14 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [localUploading, setLocalUploading] = useState(false)
   const [localUploadError, setLocalUploadError] = useState('')
 
+  // Pacote de configs em .zip (ex.: texturas): sobe em partes pelo main process e entra no
+  // modpack como um config com `extract: true` — o player baixa e o launcher extrai no perfil.
+  const [zipPick, setZipPick] = useState<{ token: string; filename: string; size: number; entries: number } | null>(null)
+  const [zipDest, setZipDest] = useState('BepInEx/config')
+  const [zipUploading, setZipUploading] = useState(false)
+  const [zipProgress, setZipProgress] = useState(0)
+  const [zipError, setZipError] = useState('')
+
 
   // Per-target drafts — persists unsaved changes when switching between modpacks
   const drafts = useRef<Partial<Record<Target, PackDraft>>>({})
@@ -586,6 +594,55 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       installPath,
       content: localFileContent,
     }])
+  }
+
+  /** Normaliza a pasta destino do zip: relativa ao perfil, sem barras nas pontas. */
+  const normalizedZipDest = (zipDest.trim() || 'BepInEx/config').replace(/^[\\/]+|[\\/]+$/g, '').replace(/\\/g, '/')
+
+  async function handlePickConfigZip() {
+    setZipError('')
+    const picked = await window.glitnir.configs.pickZip()
+    if (!picked) return
+    if ('error' in picked) { setZipError(picked.error); return }
+    setZipPick(picked)
+  }
+
+  /**
+   * Sobe o .zip pro R2 (multipart, feito no main) e adiciona ao modpack como pacote extraído.
+   * O modpack.json guarda só a URL — o zip nunca é embutido, então não pesa no limite de 5 MB.
+   */
+  async function handleUploadConfigZip() {
+    if (!zipPick) return
+    if (!adminToken) { setZipError('Faça login de admin para enviar o pacote.'); return }
+    const dest = normalizedZipDest
+    setZipUploading(true)
+    setZipError('')
+    setZipProgress(0)
+    window.glitnir.configs.onUploadProgress(({ sent, total }) => {
+      setZipProgress(total > 0 ? Math.round((sent / total) * 100) : 0)
+    })
+    try {
+      // Igual ao upload de mod privado: o main não conhece o DEFAULT_BACKEND_URL do cliente.
+      const res = await window.glitnir.configs.uploadZipStream({
+        token: zipPick.token,
+        backendUrl: (backendUrl || '').trim() || DEFAULT_BACKEND_URL,
+        authToken: adminToken,
+      })
+      if (!res.success || !res.url) throw new Error(res.error || 'Falha no upload')
+      // Substitui a entrada anterior do MESMO pacote no MESMO destino (reenvio de uma versão
+      // nova das texturas) em vez de duplicar.
+      setModpackConfigs(prev => [
+        ...prev.filter(c => !(c.extract && c.filename === zipPick.filename && c.installPath === dest)),
+        { mod: '', filename: zipPick.filename, installPath: dest, content: res.url!, extract: true },
+      ])
+      setZipPick(null)
+    } catch (err: any) {
+      setZipError(err?.message || 'Erro ao enviar o pacote')
+    } finally {
+      window.glitnir.configs.offUploadProgress()
+      setZipUploading(false)
+      setZipProgress(0)
+    }
   }
 
   /** Constrói o objeto Modpack com o estado atual do draft (mods só como referência). */
@@ -1616,6 +1673,75 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       {/* ── CONFIGS TAB ── */}
       {activeTab === 'configs' && (
         <>
+          {/* Pacote .zip (texturas e afins) — sobe pro R2 e é extraído no perfil do player */}
+          <div className="admin-section card">
+            <div className="card-header"><h3>Pacote de Configs (.zip)</h3></div>
+            <div className="card-body">
+              <p className="text-muted" style={{ fontSize: 12, marginTop: 0 }}>
+                Para conjuntos de arquivos — ex.: pacote de texturas. O .zip vai pro bucket R2 (em
+                partes, aguenta centenas de MB) e o modpack guarda só a URL. Na instalação o launcher
+                baixa e <strong>extrai o conteúdo</strong> na pasta destino do perfil, preservando as
+                subpastas do zip. O .zip não fica no perfil do player.
+              </p>
+
+              <div className="form-group">
+                <label>Pasta destino no perfil</label>
+                <input
+                  type="text"
+                  value={zipDest}
+                  onChange={e => setZipDest(e.target.value)}
+                  placeholder="BepInEx/config"
+                  style={{ fontFamily: 'monospace', fontSize: 12 }}
+                  disabled={zipUploading}
+                />
+                <span className="form-hint">
+                  Relativo ao perfil. O conteúdo do zip é extraído aqui — ex.: um zip com{' '}
+                  <code>CustomTextures/armor.png</code> e destino <code>BepInEx/config</code> vira{' '}
+                  <code>BepInEx/config/CustomTextures/armor.png</code>.
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button className="btn-ghost" style={{ fontSize: 13 }} onClick={handlePickConfigZip} disabled={zipUploading}>
+                  {zipPick ? '↻ Trocar arquivo' : '📦 Selecionar .zip'}
+                </button>
+                {zipPick && (
+                  <>
+                    <span style={{ fontSize: 12 }}>
+                      <strong>{zipPick.filename}</strong>{' '}
+                      <span className="text-muted">
+                        ({(zipPick.size / 1024 / 1024).toFixed(1)} MB · {zipPick.entries} arquivo{zipPick.entries === 1 ? '' : 's'})
+                      </span>
+                    </span>
+                    <button
+                      className="btn-secondary"
+                      style={{ fontSize: 13 }}
+                      onClick={handleUploadConfigZip}
+                      disabled={zipUploading || !adminToken}
+                    >
+                      {zipUploading ? `Enviando... ${zipProgress}%` : '↑ Enviar e adicionar ao modpack'}
+                    </button>
+                    {!zipUploading && (
+                      <button className="btn-ghost" onClick={() => { setZipPick(null); setZipError('') }}>✕</button>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {zipUploading && (
+                <div style={{ height: 4, background: 'var(--border-color)', borderRadius: 2, marginTop: 8, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${zipProgress}%`, background: 'var(--accent-green)', transition: 'width 0.2s' }} />
+                </div>
+              )}
+              {zipError && <p className="text-error" style={{ marginTop: 8, fontSize: 12 }}>{zipError}</p>}
+              {!adminToken && (
+                <p className="text-muted" style={{ marginTop: 8, fontSize: 12 }}>
+                  Faça login de admin para enviar pacotes.
+                </p>
+              )}
+            </div>
+          </div>
+
           {/* Local profile config reader */}
           <div className="admin-section card">
             <div className="card-header"><h3>Configs do Perfil Local</h3></div>
@@ -1708,10 +1834,23 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                         </div>
                         {localUploadError && <p className="text-error" style={{ fontSize: 12, marginBottom: 6 }}>{localUploadError}</p>}
                         {isBinaryConfigPath(localSelectedFile) ? (
-                          <p className="text-muted" style={{ fontSize: 12, padding: '12px 0' }}>
-                            Arquivo binário — não é editável como texto. Ele será enviado ao bucket R2
-                            e o modpack guardará a URL; os players baixam os bytes originais na instalação.
-                          </p>
+                          <>
+                            <p className="text-muted" style={{ fontSize: 12, padding: '12px 0 0' }}>
+                              Arquivo binário — não é editável como texto. Ele será enviado ao bucket R2
+                              e o modpack guardará a URL; os players baixam os bytes originais na instalação.
+                            </p>
+                            {/* .zip por aqui vai como ARQUIVO (sem extrair) e em base64 — o card do topo
+                                é o caminho certo pra pacote de texturas. */}
+                            {/\.zip$/i.test(localSelectedFile) && (
+                              <p className="text-muted" style={{ fontSize: 12, padding: '8px 0 12px' }}>
+                                ⚠ Por aqui o .zip vira <strong>um arquivo</strong> no perfil
+                                (<code>{`BepInEx/config/${localSelectedFile}`}</code>) e o envio carrega o
+                                arquivo inteiro na memória. Para pacote de texturas use o card{' '}
+                                <strong>“Pacote de Configs (.zip)”</strong> no topo: sobe em partes e o
+                                launcher <strong>extrai</strong> o conteúdo no perfil do player.
+                              </p>
+                            )}
+                          </>
                         ) : (
                           <textarea
                             className="cfg-edit-textarea"
@@ -1838,8 +1977,15 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                       <div key={`${cfg.filename}-${index}`} className={`modpack-mod-item cfg-item ${isEditing ? 'cfg-item-expanded' : ''}`}>
                         <div className="cfg-item-header">
                           <div className="mod-info">
-                            <span className="mod-name">{cfg.filename}</span>
-                            <span className="text-muted">{cfg.installPath}{cfg.mod ? ` · ${cfg.mod}` : ''}</span>
+                            <span className="mod-name">
+                              {cfg.filename}
+                              {cfg.extract && (
+                                <span className="text-muted" style={{ fontSize: 11, marginLeft: 6 }}>📦 zip extraído</span>
+                              )}
+                            </span>
+                            <span className="text-muted">
+                              {cfg.extract ? `extrai em ${cfg.installPath}/` : cfg.installPath}{cfg.mod ? ` · ${cfg.mod}` : ''}
+                            </span>
                           </div>
                           <div className="cfg-item-actions">
                             <button
@@ -1854,7 +2000,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                                 }
                               }}
                             >
-                              {isEditing ? 'Fechar' : 'Editar'}
+                              {isEditing ? 'Fechar' : cfg.extract ? 'Ver URL' : 'Editar'}
                             </button>
                             <button className="btn-ghost btn-remove" onClick={() => {
                               handleRemoveConfig(index)
