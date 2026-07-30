@@ -151,7 +151,10 @@ function friendlyDownloadError(err: any, modName: string): string {
  * mesmos headers, caminho de rede diferente.
  */
 async function fetchViaChromium(url: string, headers?: Record<string, string>): Promise<Buffer> {
-  const res = await net.fetch(url, { headers: headers || undefined, redirect: 'follow' })
+  // `no-store`: a rota Chromium usa o cache HTTP da sessão. Quando o admin republica um mod na
+  // MESMA url (mod privado servido pelo backend), o cache devolvia o zip antigo e o jogador
+  // reinstalava exatamente a versão que estava tentando trocar. Download de mod sempre vai à rede.
+  const res = await net.fetch(url, { headers: headers || undefined, redirect: 'follow', cache: 'no-store' })
   if (!res.ok) {
     const e: any = new Error(`HTTP ${res.status} ${res.statusText}`)
     e.response = { status: res.status }
@@ -651,6 +654,8 @@ function migrateAllProfiles() {
     const root = getProfilesRoot()
     if (!fs.existsSync(root)) return
     for (const profile of fs.readdirSync(root)) {
+      // Pastas internas (ex.: `.trash-*`, restos de uma remoção de perfil) não são perfis.
+      if (profile.startsWith('.')) continue
       const p = path.join(root, profile)
       try {
         if (fs.statSync(p).isDirectory()) {
@@ -671,6 +676,21 @@ function getProfilesRoot(): string {
     }
   } catch { /* ignore */ }
   return PROFILES_ROOT
+}
+
+/**
+ * Apaga restos de `.trash-*` — pastas de perfil que o plano B da remoção tirou do caminho
+ * (rename) mas não conseguiu apagar na hora porque algo ainda segurava um arquivo.
+ */
+function sweepProfileTrash(root: string) {
+  try {
+    for (const entry of fs.readdirSync(root)) {
+      if (!entry.startsWith('.trash-')) continue
+      try {
+        fs.rmSync(path.join(root, entry), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+      } catch { /* ainda em uso; tenta de novo na próxima remoção */ }
+    }
+  } catch { /* raiz inexistente */ }
 }
 
 /** Sanitiza o id do modpack para usar como nome de pasta de perfil. */
@@ -1550,6 +1570,12 @@ app.whenReady().then(() => {
   // Apaga o perfil inteiro (pasta do modpack) para forçar uma reinstalação limpa do zero.
   // Usado quando a instalação corrompe/falha no meio: em vez de mandar o jogador apagar a pasta
   // na mão, o botão "reinstalar do zero" chama isto e depois refaz o install completo.
+  //
+  // A remoção precisa ser CONFIRMADA. O rmSync recursivo falha no meio com EBUSY/EPERM/ENOTEMPTY
+  // quando o antivírus/indexador (ou o próprio jogo aberto) ainda segura o handle de uma dll do
+  // perfil — sem retry e sem conferir o resultado, o botão dizia "pronto" com a pasta pela metade
+  // e o jogador seguia com a versão velha do mod (só apagar a pasta na mão resolvia). Por isso:
+  // retry, plano B por rename (tira do caminho mesmo com handle aberto) e erro explícito no fim.
   ipcMain.handle('mods:removeProfile', (_e, profile: string) => {
     try {
       const profileRoot = profileDir(profile)
@@ -1559,8 +1585,40 @@ app.whenReady().then(() => {
       if (resolved === root || !resolved.startsWith(root + path.sep)) {
         return { success: false, error: 'Caminho de perfil inválido' }
       }
-      if (fs.existsSync(resolved)) fs.rmSync(resolved, { recursive: true, force: true })
-      return { success: true }
+
+      sweepProfileTrash(root)
+      if (!fs.existsSync(resolved)) return { success: true, path: resolved }
+
+      const hardRemove = (p: string) =>
+        fs.rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+
+      try {
+        hardRemove(resolved)
+      } catch (err: any) {
+        // Plano B: renomeia a pasta para fora do caminho ativo (funciona mesmo com arquivo em uso
+        // dentro dela) e tenta apagar o lixo. Mesmo que a limpeza falhe, o caminho do perfil está
+        // livre para ser recriado do zero — que é o que o botão promete.
+        const trash = path.join(root, `.trash-${path.basename(resolved)}-${Date.now()}`)
+        try {
+          fs.renameSync(resolved, trash)
+        } catch {
+          return {
+            success: false,
+            error: `Não foi possível apagar a pasta do profile (${resolved}). Feche o Valheim e tente de novo. Detalhe: ${err.message}`,
+          }
+        }
+        try { hardRemove(trash) } catch { console.warn('[removeProfile] lixo pendente em', trash) }
+      }
+
+      // Confere de fato: só respondemos sucesso se a pasta sumiu do disco.
+      if (fs.existsSync(resolved)) {
+        return {
+          success: false,
+          error: `A pasta do profile continua no disco após a remoção (${resolved}). Feche o Valheim e tente de novo.`,
+        }
+      }
+      console.log('[removeProfile] perfil apagado:', resolved)
+      return { success: true, path: resolved }
     } catch (err: any) {
       return { success: false, error: err.message }
     }

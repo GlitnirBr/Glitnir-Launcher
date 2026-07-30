@@ -360,17 +360,30 @@ export default function App() {
     setNewsData(merged)
   }
 
-  async function handleInstallMods() {
-    if (!modpackData || !config) return
+  /**
+   * Instala/atualiza os mods do perfil selecionado.
+   *
+   * `opts` só é usado pelo "reinstalar do zero": `fromScratch` diz que a pasta do perfil ACABOU
+   * de ser apagada (então nada precisa ser removido antes e tudo é baixado de novo), e
+   * `modpack`/`mods` passam a lista recém-buscada do backend. Sem esses overrides a função leria
+   * o estado do React capturado no clique — que pode estar velho (o poll é de 5 min) e faria o
+   * "do zero" reinstalar justamente a versão errada que o jogador quer trocar.
+   */
+  async function handleInstallMods(opts?: { fromScratch?: boolean; modpack?: Modpack; mods?: typeof mods }) {
+    const fromScratch = opts?.fromScratch === true
+    const pack = opts?.modpack || modpackData
+    const modList = opts?.mods || mods
+    if (!pack || !config) return
 
     setInstalling(true)
     try {
       const profile = selectedModpack
       // Optional mods the player turned off are excluded from install/removal accounting,
       // same as if they weren't in the modpack at all.
-      const activeMods = mods.filter(m => !m.optionalDisabled)
+      const activeMods = modList.filter(m => !m.optionalDisabled)
       // If BepInEx core files are missing on disk, ignore cached "installed" state and reinstall everything.
-      const bepinexOk = await window.glitnir.mods.bepinexOk({ profile })
+      // No caminho "do zero" a pasta acabou de ir embora — nem consulta o disco, reinstala tudo.
+      const bepinexOk = fromScratch ? false : await window.glitnir.mods.bepinexOk({ profile })
       const toInstall = bepinexOk
         ? activeMods.filter(m => !m.installed || m.outdated)
         : activeMods
@@ -378,7 +391,7 @@ export default function App() {
       // Remove mods that were installed for this profile before but are no longer in the modpack
       // (the admin took them out). Disabling an optional mod is handled instantly by the toggle
       // (files moved to the disabled store), so those don't come through here.
-      const previouslyInstalled = config.installedByProfile?.[profile] || []
+      const previouslyInstalled = fromScratch ? [] : (config.installedByProfile?.[profile] || [])
       const currentModNames = new Set(activeMods.map(m => m.name))
       const stale = previouslyInstalled.filter(m => !currentModNames.has(m.name))
       for (const mod of stale) {
@@ -410,7 +423,8 @@ export default function App() {
         // só MESCLA arquivos (copyDirRecursive), então sem apagar antes uma dll renomeada da versão
         // anterior continuaria no perfil — inclusive em downgrade. Removemos depois do download já
         // ter dado certo, pra não deixar o mod sem arquivos se a rede falhar no meio.
-        if (mod.installed) {
+        // (No "do zero" não há nada instalado: a pasta do perfil foi apagada antes.)
+        if (!fromScratch && mod.installed) {
           setInstallStatus(`Atualizando ${mod.name}...`)
           await window.glitnir.mods.remove({ modName: mod.name, profile })
         }
@@ -427,7 +441,7 @@ export default function App() {
       // Aplica as configs do modpack de forma INCREMENTAL, numa única IPC. O main pula os
       // configs cujo conteúdo não mudou E cujo arquivo já existe no disco, então um relaunch
       // sem mudanças não reescreve nada nem rebaixa os configs do R2 (o modpack tem milhares).
-      const configs = modpackData.configs || []
+      const configs = pack.configs || []
       window.glitnir.mods.onApplyConfigProgress(({ done, total }) => {
         setInstallStatus(`Aplicando configs (${done}/${total})...`)
         setInstallProgress(90 + Math.round((done / Math.max(total, 1)) * 10))
@@ -456,19 +470,58 @@ export default function App() {
     }
   }
 
-  // Apaga o profile inteiro e reinstala tudo do zero. Atalho para o procedimento manual que
-  // resolvia instalações corrompidas ("apaga o profile e instala de novo"). Como removeProfile
-  // apaga a pasta, o bepinexOk dentro de handleInstallMods dá falso e força reinstalar todos os mods.
+  /**
+   * Busca o modpack DIRETO do backend furando o cache HTTP (e a borda), sem tocar no estado.
+   * Usado pelo "reinstalar do zero": o `modpackData` em memória pode estar velho (o poll é de
+   * 5 min e revalida por ETag), e reinstalar com a lista velha refaz a instalação com a mesma
+   * versão de mod que o jogador está tentando corrigir.
+   */
+  async function fetchModpackFresh(): Promise<Modpack | null> {
+    if (!config) return null
+    const entry = modpacks.find(m => m.id === selectedModpack)
+    if (!entry || entry.type === 'vanilla') return null
+
+    if (entry.type === 'admin') {
+      if (!adminToken) return null
+      return normalizeModpack(await getAdminModpack(adminToken, config.backendUrl, true))
+    }
+
+    try {
+      const raw = await getPublicModpack(config.backendUrl || undefined, true)
+      if (raw) return normalizeModpack(raw)
+    } catch { /* backend fora do ar: cai no raw do GitHub, que já é cache-busted */ }
+    return await fetchModpackFromUrl(buildModpackRawUrl(config.modpackRepo, config.modpackBranch))
+  }
+
+  /**
+   * Apaga a PASTA INTEIRA do profile e reinstala tudo do zero — o mesmo procedimento manual que
+   * resolvia instalações corrompidas/travadas numa versão antiga de mod.
+   *
+   * Ordem importa:
+   *  1. busca o modpack fresco ANTES de apagar nada. Se a rede estiver fora, o jogador fica com
+   *     a instalação que tem (em vez de um perfil apagado e sem como reinstalar);
+   *  2. apaga a pasta e só segue se o main CONFIRMAR que ela sumiu do disco;
+   *  3. zera o estado cacheado do perfil (installedByProfile/configsHashByProfile), senão uma
+   *     falha no meio do download deixaria o launcher achando que está tudo instalado;
+   *  4. reinstala com a lista recém-buscada, ignorando qualquer flag de "instalado".
+   * Erro em qualquer etapa sobe para a ModsView mostrar no banner — antes ficava só no texto da
+   * barra de instalação, que some junto, e o clique parecia não ter feito nada.
+   */
   async function handleResetProfile() {
-    if (!modpackData || !config || selectedModpack === 'vanilla') return
+    if (!config || selectedModpack === 'vanilla') return
 
     setInstalling(true)
     setInstallProgress(0)
-    setInstallStatus('Apagando profile...')
+    setInstallStatus('Buscando a versão atual do modpack...')
     try {
       const profile = selectedModpack
+
+      const pack = await fetchModpackFresh()
+      if (!pack) throw new Error('Não foi possível buscar o modpack. Verifique sua conexão e tente de novo.')
+
+      setInstallStatus('Apagando a pasta do profile...')
       const r = await window.glitnir.mods.removeProfile(profile)
-      if (!r.success) throw new Error(r.error || 'Falha ao apagar o profile')
+      if (!r.success) throw new Error(r.error || 'Falha ao apagar a pasta do profile')
 
       // Limpa o estado cacheado do profile para a reinstalação começar do zero.
       const installedByProfile = { ...(config.installedByProfile || {}) }
@@ -477,13 +530,18 @@ export default function App() {
       delete configsHashByProfile[profile]
       await handleSaveConfig({ installedByProfile, configsHashByProfile })
 
-      // Marca tudo como não instalado no estado local antes de refazer o install.
-      setMods(prev => prev.map(m => ({ ...m, installed: false, outdated: false })))
+      // Estado local reconstruído do zero a partir do modpack fresco: nada instalado, e as
+      // preferências de mods opcionais (que são do jogador, não do disco) preservadas.
+      const enabledOptional = config.optionalModsEnabled?.[profile] || []
+      const freshMods = checkOutdated([], pack, enabledOptional)
+      setModpackData(pack)
+      setMods(freshMods)
 
-      await handleInstallMods()
+      await handleInstallMods({ fromScratch: true, modpack: pack, mods: freshMods })
     } catch (err: any) {
       setInstallStatus(err.message || 'Erro ao reinstalar')
       setInstalling(false)
+      throw err
     }
   }
 

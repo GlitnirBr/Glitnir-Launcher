@@ -34,20 +34,28 @@ export async function login(password: string, backendUrl?: string): Promise<stri
 }
 
 /** Busca o modpack público via backend (sem autenticação). */
-export async function getPublicModpack(backendUrl?: string): Promise<Modpack> {
+export async function getPublicModpack(backendUrl?: string, bustCache = false): Promise<Modpack> {
   // Sem cache-bust/no-store de propósito: o Worker serve com ETag e cacheia na borda (KV).
   // Assim o cache HTTP do Electron revalida sozinho com If-None-Match → 304 quando nada mudou,
   // e o polling não fura a borda nem executa o Worker à toa.
-  const res = await fetch(`${base(backendUrl)}/modpacks/main`)
+  //
+  // `bustCache` é a exceção: o "reinstalar do zero" precisa da verdade do backend AGORA, sem
+  // depender de cache local nem de borda. Só é usado nesse clique manual, não no polling.
+  const res = await fetch(
+    `${base(backendUrl)}/modpacks/main${bustCache ? `?t=${Date.now()}` : ''}`,
+    bustCache ? { cache: 'no-store' } : undefined,
+  )
   if (!res.ok) throw new Error('Falha ao buscar modpack público')
   return res.json()
 }
 
 /** Busca o modpack secreto de admin (requer token válido). */
-export async function getAdminModpack(token: string, backendUrl?: string): Promise<Modpack> {
+export async function getAdminModpack(token: string, backendUrl?: string, bustCache = false): Promise<Modpack> {
   // Sem cache-bust/no-store: revalidação via ETag (If-None-Match → 304) como no getPublicModpack.
-  const res = await fetch(`${base(backendUrl)}/modpacks/admin`, {
+  // `bustCache` idem: só no "reinstalar do zero", que precisa do estado atual do backend.
+  const res = await fetch(`${base(backendUrl)}/modpacks/admin${bustCache ? `?t=${Date.now()}` : ''}`, {
     headers: { Authorization: `Bearer ${token}` },
+    ...(bustCache ? { cache: 'no-store' as RequestCache } : {}),
   })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
