@@ -168,7 +168,9 @@ export default function ModsView({
         <div className="card-body">
           {mods.length === 0 && (
             <p className="text-muted">
-              Nenhum mod no modpack. Adicione mods no painel admin e publique.
+              {modpack
+                ? 'Nenhum mod no modpack. Adicione mods no painel admin e publique.'
+                : 'Este mundo ainda não tem um modpack publicado. Se ele acabou de ser criado, aguarde o anúncio da equipe.'}
             </p>
           )}
           <div className="mod-items">

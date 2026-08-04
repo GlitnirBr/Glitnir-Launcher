@@ -72,12 +72,35 @@ export interface Modpack {
   battlemetricsId?: string
 }
 
+/**
+ * Alvo do modpack no backend. Cada MUNDO público é um modpack independente
+ * (`main` = Mundo 1, `main2` = Mundo 2); `admin` é o modpack secreto de teste.
+ */
+export type ModpackTarget = 'main' | 'main2' | 'admin'
+
+/**
+ * Um "mundo" do Glitnir: servidor próprio, com mods e configs próprios (o IP fica na
+ * config de um dos mods). Para o jogador NÃO é um modpack separado na lista — ele
+ * escolhe o modpack "Glitnir" e depois o mundo, nos cards da barra lateral.
+ */
+export interface WorldInfo {
+  /** Nome curto exibido no card (ex.: "Mundo 1"). */
+  label: string
+  /** Uma linha de contexto no card (ex.: "Servidor principal"). */
+  tagline: string
+}
+
 /** Identifica um modpack na barra lateral. */
 export interface ModpackEntry {
+  /** Id do perfil = pasta de instalação dos mods. Nunca muda depois de publicado. */
   id: string
   name: string
   type: 'vanilla' | 'public' | 'admin'
   builtin?: boolean
+  /** Rota do modpack no backend. Ausente no vanilla (não tem modpack). */
+  target?: ModpackTarget
+  /** Quando presente, o modpack é um mundo do Glitnir (ver WorldInfo). */
+  world?: WorldInfo
 }
 
 export interface Config {

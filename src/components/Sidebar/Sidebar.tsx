@@ -1,13 +1,14 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import logoImg from '../../assets/logo.png'
 import { DISCORD_URL, WEBSITE_URL } from '../../constants/links'
+import { ModpackEntry } from '../../types'
 import './Sidebar.css'
 
 interface Props {
   currentView: string
   onViewChange: (view: string) => void
   selectedModpack: string
-  modpacks: { id: string; name: string }[]
+  modpacks: ModpackEntry[]
   onModpackChange: (id: string) => void
   onPlay: () => void
   isPlaying: boolean
@@ -38,6 +39,44 @@ export default function Sidebar({
 }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const selectedModpackData = modpacks.find(m => m.id === selectedModpack)
+
+  // Os mundos do Glitnir são modpacks separados por baixo (mods/configs/servidor próprios),
+  // mas para o jogador são UMA opção — "Glitnir" — no dropdown. A escolha do mundo acontece
+  // nos cards logo abaixo, que só aparecem com o Glitnir selecionado.
+  const worlds = modpacks.filter(m => m.world)
+  const isWorldSelected = !!selectedModpackData?.world
+
+  // Último mundo em que o jogador esteve: voltar de Vanilla para Glitnir devolve ele ao
+  // mundo dele, não sempre ao Mundo 1.
+  const lastWorldId = useRef(worlds[0]?.id)
+  useEffect(() => {
+    if (isWorldSelected) lastWorldId.current = selectedModpack
+  }, [isWorldSelected, selectedModpack])
+
+  // Lista do dropdown com os mundos colapsados numa entrada só, na posição do primeiro
+  // mundo (mantém a ordem Vanilla → Glitnir → Glitnir Admin).
+  const dropdownItems: { id: string; name: string; isWorldGroup?: boolean }[] = []
+  for (const mp of modpacks) {
+    if (mp.world) {
+      if (!dropdownItems.some(i => i.isWorldGroup)) {
+        dropdownItems.push({ id: '__glitnir__', name: 'Glitnir', isWorldGroup: true })
+      }
+      continue
+    }
+    dropdownItems.push({ id: mp.id, name: mp.name })
+  }
+
+  function handlePickDropdown(item: { id: string; isWorldGroup?: boolean }) {
+    setDropdownOpen(false)
+    if (!item.isWorldGroup) {
+      onModpackChange(item.id)
+      return
+    }
+    // "Glitnir": mantém o mundo atual se já estiver num, senão volta pro último usado.
+    if (isWorldSelected) return
+    const target = worlds.find(w => w.id === lastWorldId.current)?.id || worlds[0]?.id
+    if (target) onModpackChange(target)
+  }
 
   return (
     <aside className="sidebar">
@@ -110,26 +149,51 @@ export default function Sidebar({
               aria-expanded={dropdownOpen}
               onClick={() => setDropdownOpen(!dropdownOpen)}
             >
-              <span>{selectedModpackData?.name || 'Selecionar...'}</span>
+              <span>{isWorldSelected ? 'Glitnir' : selectedModpackData?.name || 'Selecionar...'}</span>
               <svg className="dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="6,9 12,15 18,9" />
               </svg>
             </button>
             {dropdownOpen && (
               <div className="dropdown-menu">
-                {modpacks.map(mp => (
+                {dropdownItems.map(item => (
                   <button
-                    key={mp.id}
-                    className={`dropdown-item ${mp.id === selectedModpack ? 'active' : ''}`}
-                    onClick={() => { onModpackChange(mp.id); setDropdownOpen(false) }}
+                    key={item.id}
+                    className={`dropdown-item ${item.isWorldGroup ? (isWorldSelected ? 'active' : '') : item.id === selectedModpack ? 'active' : ''}`}
+                    onClick={() => handlePickDropdown(item)}
                   >
-                    {mp.name}
+                    {item.name}
                   </button>
                 ))}
               </div>
             )}
           </div>
         </div>
+
+        {/* Escolha do mundo — só faz sentido com o Glitnir selecionado. */}
+        {isWorldSelected && worlds.length > 1 && (
+          <div className="world-selector">
+            <label className="selector-label">Mundo</label>
+            <div className="world-cards">
+              {worlds.map((w, i) => {
+                const active = w.id === selectedModpack
+                return (
+                  <button
+                    key={w.id}
+                    className={`world-card ${active ? 'active' : ''}`}
+                    onClick={() => onModpackChange(w.id)}
+                    title={`${w.name} — ${w.world!.tagline}`}
+                    aria-pressed={active}
+                  >
+                    <span className="world-card-icon">{i === 0 ? <SwordIcon /> : <ShieldIcon />}</span>
+                    <span className="world-card-name">{w.world!.label}</span>
+                    <span className="world-card-tagline">{active ? 'Selecionado' : w.world!.tagline}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         <button className="btn-play" onClick={onPlay} disabled={isPlaying}>
           {isPlaying ? (
@@ -190,6 +254,29 @@ function NavItem({ active, onClick, icon, label, accent }: {
       <span>{label}</span>
       {active && <span className="nav-indicator" />}
     </button>
+  )
+}
+
+/** Ícone do card do Mundo 1 — espada. */
+function SwordIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.5 17.5 3 6V3h3l11.5 11.5" />
+      <path d="m13 19 6-6" />
+      <path d="m16 16 4 4" />
+      <path d="m19 21 2-2" />
+    </svg>
+  )
+}
+
+/** Ícone do card do Mundo 2 — escudo com runa. */
+function ShieldIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s7-3.5 7-9V5l-7-3-7 3v8c0 5.5 7 9 7 9z" />
+      <path d="M12 7v9" />
+      <path d="m9 10 3-3 3 3" />
+    </svg>
   )
 }
 

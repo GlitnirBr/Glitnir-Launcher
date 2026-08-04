@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Config, Mod, ModConfig, Modpack } from '../types'
+import { Config, Mod, ModConfig, Modpack, ModpackTarget } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
 import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath, isTextConfigPath, byteLength, stripModToReference } from '../utils/modManager'
 import { getAdminModpack, getPublicModpack, publishModpack, listPrivateMods, uploadConfig, DEFAULT_BACKEND_URL } from '../utils/backendApi'
@@ -12,8 +12,19 @@ interface Props {
   onSave?: (updates: Partial<Config>) => Promise<void>
 }
 
-type Target = 'main' | 'admin'
+/**
+ * Cada mundo do servidor é um modpack independente publicado num alvo próprio:
+ * `main` = Mundo 1, `main2` = Mundo 2, `admin` = modpack secreto de teste.
+ */
+type Target = ModpackTarget
 type Tab = 'online' | 'modpack' | 'configs'
+
+/** Nome de cada alvo na interface do admin. */
+const TARGET_LABELS: Record<Target, string> = {
+  main: 'Glitnir Mundo 1',
+  main2: 'Glitnir Mundo 2',
+  admin: 'Glitnir Admin',
+}
 
 type PackDraft = {
   name: string
@@ -76,6 +87,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [publishing, setPublishing] = useState(false)
+  // "Copiar do Mundo 1": confirmação + carregando (a busca no backend leva alguns segundos).
+  const [confirmCopy, setConfirmCopy] = useState(false)
+  const [copyingWorld1, setCopyingWorld1] = useState(false)
   // installPaths dos configs binários inline que o publish NÃO conseguiu subir pro R2
   // (arquivo não achado no disco). Quando setado, o banner de erro oferece removê-los.
   const [unresolvedBinaries, setUnresolvedBinaries] = useState<string[]>([])
@@ -172,16 +186,17 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         data = await getAdminModpack(adminToken, backendUrl || undefined)
       } else {
         // Try backend first (uses DEFAULT_BACKEND_URL when backendUrl is empty); fall back to GitHub.
+        // Cada mundo tem seu próprio arquivo/rota — daí o `target` nas duas buscas.
         try {
-          data = await getPublicModpack(backendUrl || undefined)
+          data = await getPublicModpack(backendUrl || undefined, false, target)
         } catch { /* ignore */ }
         if (!data) {
-          const url = buildModpackRawUrl(modpackRepo, modpackBranch)
+          const url = buildModpackRawUrl(modpackRepo, modpackBranch, target)
           data = await fetchModpackFromUrl(url)
         }
       }
       const fetched: PackDraft = {
-        name: data?.name || (target === 'admin' ? 'Glitnir Admin' : 'Glitnir'),
+        name: data?.name || TARGET_LABELS[target],
         description: data?.description || '',
         version: data?.version || '1.0.0',
         battlemetricsId: data?.battlemetricsId || '',
@@ -192,9 +207,11 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       drafts.current[target] = fetched
       applyDraft(fetched)
     } catch {
+      // Sem modpack publicado ainda (ex.: Mundo 2 recém-criado): começa vazio, com o nome
+      // do alvo já preenchido. O admin monta a lista ou usa "Copiar do Mundo 1".
       loadedTargets.current.add(target)
       const fallback: PackDraft = {
-        name: target === 'admin' ? 'Glitnir Admin' : 'Glitnir',
+        name: TARGET_LABELS[target],
         description: '',
         version: '1.0.0',
         battlemetricsId: '',
@@ -221,6 +238,42 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       configs: modpackConfigs,
     }
   }, [target, packName, packDescription, packVersion, packBattlemetricsId, modpackMods, modpackConfigs])
+
+  /**
+   * Preenche o modpack atual com os mods e configs do Mundo 1 — atalho para montar um mundo
+   * novo, que na prática começa como uma variação do principal. Copia SÓ a lista (nome,
+   * descrição e versão deste modpack ficam como estão) e não publica nada.
+   *
+   * Prefere o rascunho do Mundo 1 já aberto nesta sessão (que pode ter edições ainda não
+   * publicadas, o que o admin acabou de ver na tela); só busca no backend se ele nunca foi
+   * aberto aqui. Clona os objetos para os dois modpacks não passarem a editar a mesma lista.
+   */
+  async function handleCopyFromWorld1() {
+    setError('')
+    setCopyingWorld1(true)
+    try {
+      const draft = loadedTargets.current.has('main') ? drafts.current['main'] : undefined
+      let mods = draft?.mods
+      let configs = draft?.configs
+      if (!draft) {
+        let data: Modpack | null = null
+        try {
+          data = await getPublicModpack(backendUrl || undefined, true, 'main')
+        } catch { /* backend fora do ar: tenta o raw do GitHub abaixo */ }
+        if (!data) data = await fetchModpackFromUrl(buildModpackRawUrl(modpackRepo, modpackBranch, 'main'))
+        mods = data.mods || []
+        configs = data.configs || []
+      }
+      setModpackMods((mods || []).map(m => ({ ...m })))
+      setModpackConfigs((configs || []).map(c => ({ ...c })))
+      loadedTargets.current.add(target)
+      setConfirmCopy(false)
+    } catch (err: any) {
+      setError(err?.message || 'Falha ao copiar o modpack do Mundo 1')
+    } finally {
+      setCopyingWorld1(false)
+    }
+  }
 
   const loadMods = useCallback(() => {
     setLoadingMods(true)
@@ -1321,10 +1374,47 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                     setTarget(t)
                   }}
                 >
-                  <option value="main">Glitnir (servidor público)</option>
+                  <option value="main">Glitnir Mundo 1 (servidor público)</option>
+                  <option value="main2">Glitnir Mundo 2 (servidor público)</option>
                   <option value="admin">Glitnir Admin (secreto)</option>
                 </select>
+                <span className="form-hint">
+                  Cada mundo é um servidor com mods e configs próprios (o IP fica na config de um
+                  mod). O jogador escolhe o mundo direto na barra lateral do launcher.
+                </span>
               </div>
+
+              {/* Atalho para montar um mundo novo a partir do que já está no ar no Mundo 1. */}
+              {target !== 'main' && (
+                <div className="form-group">
+                  <label>Começar a partir do Mundo 1</label>
+                  {!confirmCopy ? (
+                    <button className="btn-ghost" style={{ fontSize: 13, alignSelf: 'flex-start' }}
+                      onClick={() => setConfirmCopy(true)} disabled={copyingWorld1}>
+                      ⧉ Copiar mods e configs do Mundo 1
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <span className="text-secondary" style={{ fontSize: 13 }}>
+                        Substituir os {modpackMods.length} mod(s) e {modpackConfigs.length} config(s) deste
+                        modpack pelos do Mundo 1?
+                      </span>
+                      <button className="btn-secondary" style={{ fontSize: 13 }}
+                        onClick={handleCopyFromWorld1} disabled={copyingWorld1}>
+                        {copyingWorld1 ? 'Copiando...' : 'Copiar'}
+                      </button>
+                      <button className="btn-ghost" style={{ fontSize: 13 }}
+                        onClick={() => setConfirmCopy(false)} disabled={copyingWorld1}>
+                        Cancelar
+                      </button>
+                    </div>
+                  )}
+                  <span className="form-hint">
+                    Traz a lista atual do Mundo 1 para cá (o nome, a descrição e a versão deste modpack
+                    são mantidos). Nada é publicado até você clicar em Publicar.
+                  </span>
+                </div>
+              )}
               <div className="form-group">
                 <label>Descrição</label>
                 <input type="text" value={packDescription} onChange={e => setPackDescription(e.target.value)} />
@@ -1662,7 +1752,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
                 onClick={handlePublish} disabled={publishing}>
-                {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Glitnir' : 'Glitnir Admin'})`}
+                {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${TARGET_LABELS[target]})`}
               </button>
               {publishProgressBar}
             </div>
@@ -2052,7 +2142,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
               <button className="btn-play" style={{ width: 'auto', padding: '12px 32px' }}
                 onClick={handlePublish} disabled={publishing}>
-                {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${target === 'main' ? 'Glitnir' : 'Glitnir Admin'})`}
+                {publishing ? 'Publicando...' : saved ? 'Publicado!' : `Publicar (${TARGET_LABELS[target]})`}
               </button>
               {publishProgressBar}
             </div>

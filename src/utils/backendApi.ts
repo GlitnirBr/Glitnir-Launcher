@@ -1,4 +1,4 @@
-import { Modpack, PrivateModDownload } from '../types'
+import { Modpack, ModpackTarget, PrivateModDownload } from '../types'
 
 export const DEFAULT_BACKEND_URL = 'https://glitnir-launcher-backend.glitnir-valhala.workers.dev'
 
@@ -33,8 +33,15 @@ export async function login(password: string, backendUrl?: string): Promise<stri
   return data.token
 }
 
-/** Busca o modpack público via backend (sem autenticação). */
-export async function getPublicModpack(backendUrl?: string, bustCache = false): Promise<Modpack> {
+/**
+ * Busca o modpack público de um mundo via backend (sem autenticação).
+ * `target` escolhe o mundo: 'main' = Mundo 1, 'main2' = Mundo 2.
+ */
+export async function getPublicModpack(
+  backendUrl?: string,
+  bustCache = false,
+  target: Exclude<ModpackTarget, 'admin'> = 'main',
+): Promise<Modpack> {
   // Sem cache-bust/no-store de propósito: o Worker serve com ETag e cacheia na borda (KV).
   // Assim o cache HTTP do Electron revalida sozinho com If-None-Match → 304 quando nada mudou,
   // e o polling não fura a borda nem executa o Worker à toa.
@@ -42,7 +49,7 @@ export async function getPublicModpack(backendUrl?: string, bustCache = false): 
   // `bustCache` é a exceção: o "reinstalar do zero" precisa da verdade do backend AGORA, sem
   // depender de cache local nem de borda. Só é usado nesse clique manual, não no polling.
   const res = await fetch(
-    `${base(backendUrl)}/modpacks/main${bustCache ? `?t=${Date.now()}` : ''}`,
+    `${base(backendUrl)}/modpacks/${target}${bustCache ? `?t=${Date.now()}` : ''}`,
     bustCache ? { cache: 'no-store' } : undefined,
   )
   if (!res.ok) throw new Error('Falha ao buscar modpack público')
@@ -67,7 +74,7 @@ export async function getAdminModpack(token: string, backendUrl?: string, bustCa
 /** Publica (commita) um modpack no GitHub via backend. */
 export async function publishModpack(
   token: string,
-  target: 'main' | 'admin',
+  target: ModpackTarget,
   modpack: Modpack,
   message?: string,
   backendUrl?: string,

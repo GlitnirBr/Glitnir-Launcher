@@ -1,6 +1,7 @@
 import { ReactNode } from 'react'
 import Sidebar from '../Sidebar/Sidebar'
 import TitleBar from '../TitleBar/TitleBar'
+import { ModpackEntry } from '../../types'
 import './Layout.css'
 
 interface Props {
@@ -8,7 +9,7 @@ interface Props {
   currentView: string
   onViewChange: (view: string) => void
   selectedModpack: string
-  modpacks: { id: string; name: string }[]
+  modpacks: ModpackEntry[]
   onModpackChange: (id: string) => void
   onPlay: () => void
   isPlaying: boolean

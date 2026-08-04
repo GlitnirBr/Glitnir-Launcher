@@ -24,8 +24,27 @@ const FALLBACK_NEWS: NewsItem[] = [
 ]
 
 const VANILLA: ModpackEntry = { id: 'vanilla', name: 'Vanilla', type: 'vanilla', builtin: true }
-const MAIN: ModpackEntry = { id: 'glitnir', name: 'Glitnir', type: 'public' }
-const ADMIN_TEST: ModpackEntry = { id: 'glitnir-admin', name: 'Glitnir Admin', type: 'admin' }
+/**
+ * Mundos do Glitnir. Cada mundo é um servidor com modpack próprio (mods, configs e IP —
+ * este último vem da config de um dos mods), instalado numa pasta de perfil separada.
+ * O id do Mundo 1 continua sendo 'glitnir': é a pasta que os jogadores já têm instalada,
+ * trocá-lo faria todo mundo re-baixar o modpack inteiro.
+ */
+const WORLD_1: ModpackEntry = {
+  id: 'glitnir',
+  name: 'Glitnir Mundo 1',
+  type: 'public',
+  target: 'main',
+  world: { label: 'Mundo 1', tagline: 'Servidor principal' },
+}
+const WORLD_2: ModpackEntry = {
+  id: 'glitnir-mundo2',
+  name: 'Glitnir Mundo 2',
+  type: 'public',
+  target: 'main2',
+  world: { label: 'Mundo 2', tagline: 'Novo mundo' },
+}
+const ADMIN_TEST: ModpackEntry = { id: 'glitnir-admin', name: 'Glitnir Admin', type: 'admin', target: 'admin' }
 
 export default function App() {
   const [config, setConfig] = useState<Config | null>(null)
@@ -36,10 +55,16 @@ export default function App() {
   const [showAdminModal, setShowAdminModal] = useState(false)
 
   const [currentView, setCurrentView] = useState('home')
-  const [selectedModpack, setSelectedModpack] = useState(MAIN.id)
+  const [selectedModpack, setSelectedModpack] = useState(WORLD_1.id)
 
   const [modpackData, setModpackData] = useState<Modpack | null>(null)
   const [mods, setMods] = useState<(Mod & { installed?: boolean; outdated?: boolean })[]>([])
+  /**
+   * Perfil a que o `modpackData`/`mods` em memória pertencem. Trocar de mundo dispara um
+   * fetch assíncrono; até ele voltar, o estado ainda é o do mundo anterior — instalar com
+   * ele encheria a pasta do mundo novo com os mods do antigo. `null` = ainda não carregado.
+   */
+  const [modpackProfile, setModpackProfile] = useState<string | null>(null)
   const [newsData, setNewsData] = useState<NewsData>({ news: [] })
 
   const [installing, setInstalling] = useState(false)
@@ -61,14 +86,14 @@ export default function App() {
   const serverAddress = (newsData.serverInfo?.ip || '').trim()
 
   const modpacks: ModpackEntry[] = isAdmin
-    ? [VANILLA, MAIN, ADMIN_TEST]
-    : [VANILLA, MAIN]
+    ? [VANILLA, WORLD_1, WORLD_2, ADMIN_TEST]
+    : [VANILLA, WORLD_1, WORLD_2]
 
   const loadConfig = useCallback(async () => {
     try {
       const cfg = await window.glitnir.config.load()
       // Migra ids antigos de perfil para os novos nomes de pasta (principal → glitnir).
-      const LEGACY_IDS: Record<string, string> = { principal: MAIN.id, 'admin-teste': ADMIN_TEST.id }
+      const LEGACY_IDS: Record<string, string> = { principal: WORLD_1.id, 'admin-teste': ADMIN_TEST.id }
       const selected = cfg.selectedModpack ? (LEGACY_IDS[cfg.selectedModpack] || cfg.selectedModpack) : undefined
       // Descarta backendUrl de workers antigos (conta Cloudflare trocada) para cair no DEFAULT_BACKEND_URL.
       const backendUrl = normalizeBackendUrl(cfg.backendUrl)
@@ -110,6 +135,7 @@ export default function App() {
     if (!entry || entry.type === 'vanilla') {
       setModpackData(null)
       setMods([])
+      setModpackProfile(selectedModpack)
       return
     }
 
@@ -119,17 +145,20 @@ export default function App() {
         if (!adminToken) {
           setModpackData(null)
           setMods([])
+          setModpackProfile(null)
           return
         }
         data = await getAdminModpack(adminToken, config.backendUrl)
       } else {
         // Try backend first (uses DEFAULT_BACKEND_URL when backendUrl is empty); fall back to GitHub raw.
+        // `target` escolhe o mundo — cada um tem seu próprio modpack no backend/repo.
+        const target = entry.target === 'main2' ? 'main2' : 'main'
         let rawData: any = null
         try {
-          rawData = await getPublicModpack(config.backendUrl || undefined)
+          rawData = await getPublicModpack(config.backendUrl || undefined, false, target)
         } catch { /* ignore, will try GitHub */ }
         if (!rawData) {
-          const url = buildModpackRawUrl(config.modpackRepo, config.modpackBranch)
+          const url = buildModpackRawUrl(config.modpackRepo, config.modpackBranch, target)
           rawData = await fetchModpackFromUrl(url)
         }
         data = normalizeModpack(rawData)
@@ -139,10 +168,14 @@ export default function App() {
       const installed = config.installedByProfile?.[entry.id] || []
       const enabledOptional = config.optionalModsEnabled?.[entry.id] || []
       setMods(checkOutdated(installed, data, enabledOptional))
+      setModpackProfile(entry.id)
     } catch (err) {
       console.error('Falha ao carregar modpack:', err)
       setModpackData(null)
       setMods([])
+      // Sem `modpackProfile`: um Jogar depois disso tenta buscar de novo em vez de
+      // seguir com a lista vazia como se fosse a verdade deste mundo.
+      setModpackProfile(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedModpack, config, adminToken, isAdmin])
@@ -297,6 +330,16 @@ export default function App() {
     }
     await window.glitnir.config.save(merged)
     await loadConfig()
+  }
+
+  /**
+   * Troca o modpack/mundo selecionado e GRAVA a escolha, para o launcher reabrir no mesmo
+   * mundo. Só persiste (não recarrega a config inteira): `selectedModpack` já vive no estado
+   * local e um loadConfig aqui refaria o fetch do modpack no meio da troca.
+   */
+  function handleModpackChange(id: string) {
+    setSelectedModpack(id)
+    window.glitnir.config.save({ selectedModpack: id }).catch(() => {})
   }
 
   /**
@@ -492,11 +535,12 @@ export default function App() {
       return normalizeModpack(await getAdminModpack(adminToken, config.backendUrl, true))
     }
 
+    const target = entry.target === 'main2' ? 'main2' : 'main'
     try {
-      const raw = await getPublicModpack(config.backendUrl || undefined, true)
+      const raw = await getPublicModpack(config.backendUrl || undefined, true, target)
       if (raw) return normalizeModpack(raw)
     } catch { /* backend fora do ar: cai no raw do GitHub, que já é cache-busted */ }
-    return await fetchModpackFromUrl(buildModpackRawUrl(config.modpackRepo, config.modpackBranch))
+    return await fetchModpackFromUrl(buildModpackRawUrl(config.modpackRepo, config.modpackBranch, target))
   }
 
   /**
@@ -542,6 +586,7 @@ export default function App() {
       const freshMods = checkOutdated([], pack, enabledOptional)
       setModpackData(pack)
       setMods(freshMods)
+      setModpackProfile(profile)
 
       await handleInstallMods({ fromScratch: true, modpack: pack, mods: freshMods })
     } catch (err: any) {
@@ -567,25 +612,63 @@ export default function App() {
       // "installed" flags lie — force a full reinstall so we recreate the profile from scratch
       // instead of launching into a missing BepInEx.dll.
       if (selectedModpack !== 'vanilla') {
+        const installedHere = config.installedByProfile?.[selectedModpack] || []
+
+        // O estado em memória pode ser de OUTRO mundo (a troca dispara um fetch assíncrono e
+        // o jogador pode clicar em Jogar antes dele voltar). Instalar assim colocaria os mods
+        // do mundo anterior na pasta deste — busca o modpack certo antes de mexer em disco.
+        let pack = modpackData
+        let modList = mods
+        if (modpackProfile !== selectedModpack) {
+          // Sem status próprio: a barra de instalação só aparece com `installing`, e o botão
+          // já está em "Iniciando..." enquanto isso.
+          const fresh = await fetchModpackFresh()
+          if (fresh) {
+            const enabledOptional = config.optionalModsEnabled?.[selectedModpack] || []
+            pack = fresh
+            modList = checkOutdated(installedHere, fresh, enabledOptional)
+            setModpackData(pack)
+            setMods(modList)
+            setModpackProfile(selectedModpack)
+          } else {
+            // Nada veio do backend nem do GitHub: sem lista para instalar.
+            pack = null
+            modList = []
+          }
+        }
+
+        // Mundo ainda sem modpack publicado (ou modpack que não carregou) e nada instalado:
+        // seguir daqui abriria o jogo com um perfil vazio — sem BepInEx, o que parece
+        // "entrei e não tinha mod nenhum". Melhor avisar e deixar o jogador tentar de novo.
+        if (!pack && installedHere.length === 0) {
+          setLaunchError(
+            'Este mundo ainda não tem um modpack disponível.\n\n' +
+            'Se o mundo acabou de ser criado, aguarde o anúncio da equipe. ' +
+            'Se já deveria estar no ar, verifique sua conexão e tente de novo em instantes.',
+          )
+          return
+        }
+
         const bepinexOk = await window.glitnir.mods.bepinexOk({ profile: selectedModpack })
         // Pendência = mod ATIVO faltando/desatualizado. Desativar um opcional já move os arquivos
         // para o depósito na hora, então não gera pendência de launch.
-        const hasPending = mods.some(m => !m.optionalDisabled && (!m.installed || m.outdated))
+        const hasPending = modList.some(m => !m.optionalDisabled && (!m.installed || m.outdated))
         // Configs mudaram = admin editou/adicionou config sem subir versão de mod. Sem isso,
         // uma mudança só de config nunca chegava ao player (os configs eram aplicados apenas
         // dentro de handleInstallMods, que só rodava quando havia mod pendente).
         const configsChanged =
-          (config.configsHashByProfile?.[selectedModpack] ?? '') !== hashConfigs(modpackData?.configs)
+          (config.configsHashByProfile?.[selectedModpack] ?? '') !== hashConfigs(pack?.configs)
         // Mod órfão = admin REMOVEU um mod do modpack (sem adicionar/atualizar outro nem mexer
         // em config). Sem este check o gate não dispararia — nenhum mod ativo fica pendente e o
         // config não muda —, então o handleInstallMods (que apaga os órfãos) nunca rodava e o
         // jogo continuava carregando o mod removido do perfil. Espelha o mesmo cálculo de `stale`
         // feito lá dentro (installedByProfile vs. mods ativos atuais).
-        const currentActive = new Set(mods.filter(m => !m.optionalDisabled).map(m => m.name))
-        const hasStale = (config.installedByProfile?.[selectedModpack] || [])
-          .some(m => !currentActive.has(m.name))
+        const currentActive = new Set(modList.filter(m => !m.optionalDisabled).map(m => m.name))
+        const hasStale = installedHere.some(m => !currentActive.has(m.name))
         if (!bepinexOk || hasPending || configsChanged || hasStale) {
-          await handleInstallMods()
+          // Passa a lista deste mundo explicitamente: `pack`/`modList` podem ter acabado de
+          // ser buscados aqui e o estado do React ainda não ter chegado ao install.
+          await handleInstallMods({ modpack: pack || undefined, mods: modList })
         }
       }
 
@@ -613,7 +696,7 @@ export default function App() {
     if (isAdmin) {
       setIsAdmin(false)
       setAdminToken(null)
-      if (selectedModpack === ADMIN_TEST.id) setSelectedModpack(MAIN.id)
+      if (selectedModpack === ADMIN_TEST.id) handleModpackChange(WORLD_1.id)
       setCurrentView('home')
     } else {
       setShowAdminModal(true)
@@ -659,7 +742,7 @@ export default function App() {
         onViewChange={setCurrentView}
         selectedModpack={selectedModpack}
         modpacks={modpacks}
-        onModpackChange={setSelectedModpack}
+        onModpackChange={handleModpackChange}
         onPlay={handlePlay}
         isPlaying={isPlaying}
         modpackVersion={modpackData?.version}
