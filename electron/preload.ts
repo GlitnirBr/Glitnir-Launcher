@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld('glitnir', {
     pickZip: () => ipcRenderer.invoke('configs:pickZip'),
     uploadZipStream: (args: { token: string; backendUrl: string; authToken: string }) =>
       ipcRenderer.invoke('configs:uploadZipStream', args),
+    uploadFileStream: (args: { filePath: string; filename: string; backendUrl: string; authToken: string }) =>
+      ipcRenderer.invoke('configs:uploadFileStream', args),
     onUploadProgress: (callback: (data: { filename: string; sent: number; total: number }) => void) => {
       const handler = (_e: Electron.IpcRendererEvent, data: { filename: string; sent: number; total: number }) => callback(data)
       ipcRenderer.removeAllListeners('configs:uploadProgress')

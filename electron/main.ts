@@ -18,6 +18,11 @@ const PROFILES_ROOT = path.join(DATA_PATH, 'profiles')
 // última) e ≥5MB; o limite de body por request do Worker é ~100MB. 25MiB fica folgado.
 const MOD_UPLOAD_PART_SIZE = 25 * 1024 * 1024
 
+// Teto do config enviado em PUT único (configs:uploadFileStream). O corpo vai streamado,
+// então não é memória que limita: é o body máximo por request do Worker (100MB no
+// Free/Pro). 90MiB deixa margem. Acima disso o caminho é o multipart (configs:uploadZipStream).
+const CONFIG_SINGLE_PUT_MAX = 90 * 1024 * 1024
+
 // Arquivos de mod escolhidos no diálogo, por token opaco. O renderer recebe só o token
 // (não o caminho absoluto), então não consegue mandar o app subir um arquivo arbitrário
 // do disco — só o que o admin escolheu no diálogo do SO. Ver mods:pickModFile/uploadPrivateModStream.
@@ -1541,6 +1546,72 @@ app.whenReady().then(() => {
     } finally {
       if (fd !== null) { try { fs.closeSync(fd) } catch { /* ignore */ } }
       pickedModFiles.delete(token)
+    }
+  })
+
+  // Sobe UM config do disco pro R2 via Worker, em PUT único com o corpo STREAMADO.
+  // Substitui o antigo fs:readFileBase64 + POST /configs/upload, que trazia o arquivo
+  // inteiro em base64 pro renderer e mandava dentro de um JSON: o Worker segurava ~6
+  // cópias do arquivo por request e, como os 128MB dele são por isolate (divididos
+  // entre TODOS os uploads em voo), subir um modpack com muitas configs derrubava o
+  // Worker com "exceeded memory limit". Aqui os bytes vão direto do disco pro socket.
+  //
+  // O arquivo é lido duas vezes, sempre em streaming: a 1ª pro sha256 (que precisa ir
+  // na query ANTES do corpo começar) e a 2ª como corpo. Memória constante nas duas.
+  ipcMain.handle('configs:uploadFileStream', async (
+    _e,
+    { filePath, filename, backendUrl, authToken }:
+      { filePath: string; filename: string; backendUrl: string; authToken: string },
+  ) => {
+    if (typeof backendUrl !== 'string' || !/^https?:\/\//i.test(backendUrl)) {
+      return { success: false, error: 'Backend inválido' }
+    }
+    // Mesmo confinamento de caminho do fs:readFileBase64, que esta rota substitui.
+    if (!isPathAllowed(filePath)) return { success: false, error: 'Acesso negado a este arquivo' }
+    // A key do R2 é um segmento só; barra aqui viraria path traversal no bucket.
+    if (!filename || /[/\\]/.test(filename) || filename.includes('..')) {
+      return { success: false, error: 'Nome de config inválido' }
+    }
+    const base = backendUrl.replace(/\/+$/, '')
+    const axios = require('axios')
+    try {
+      const total = fs.statSync(filePath).size
+      // Config vazio zeraria o do player quando aplicado — mesma regra do fluxo de texto.
+      if (total === 0) return { success: false, error: 'Arquivo vazio' }
+      if (total > CONFIG_SINGLE_PUT_MAX) {
+        return {
+          success: false,
+          error: `Config grande demais para envio único (${(total / 1024 / 1024).toFixed(1)} MB). Empacote como .zip e use o upload de pacote.`,
+        }
+      }
+
+      // sha256 dos bytes, em streaming (não carrega o arquivo na memória).
+      const sha256 = await new Promise<string>((resolve, reject) => {
+        const h = crypto.createHash('sha256')
+        const rs = fs.createReadStream(filePath)
+        rs.on('data', chunk => h.update(chunk))
+        rs.on('error', reject)
+        rs.on('end', () => resolve(h.digest('hex')))
+      })
+
+      const q = `filename=${encodeURIComponent(filename)}&sha256=${sha256}`
+      const res = await axios.put(`${base}/configs/upload?${q}`, fs.createReadStream(filePath), {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'Content-Type': 'application/octet-stream',
+          // OBRIGATÓRIO: com um stream no corpo o Node usaria Transfer-Encoding: chunked,
+          // e o R2 recusa gravar de stream sem tamanho conhecido ("Provided readable
+          // stream must have a known length") — o Worker devolve 411 nesse caso.
+          'Content-Length': String(total),
+        },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+        timeout: 300000,
+      })
+      const url = res.data?.url || `${base}/configs/${sha256.slice(0, 8)}-${filename}`
+      return { success: true, url, sha256 }
+    } catch (err: any) {
+      return { success: false, error: err?.response?.data?.error || err?.message || 'Falha no upload' }
     }
   })
 

@@ -173,29 +173,48 @@ export async function uploadImage(
 }
 
 /**
- * Faz upload de um config BINÁRIO (base64) para o R2 via backend e retorna a URL
- * pública content-addressed. Usado para configs que não podem virar string JSON no
- * modpack (ex.: spritesheet .png). O modpack passa a guardar essa URL no `content`,
- * e o player baixa os bytes via `mods:applyConfig`.
- * Endpoint: POST /configs/upload { filename, content(base64) } -> { url, key }
+ * Faz upload de um config para o R2 via backend e retorna a URL pública
+ * content-addressed. Usado para configs que não podem (ou não devem) virar string JSON
+ * no modpack: binários como spritesheet .png, e textos grandes que estourariam o
+ * orçamento do modpack.json. O modpack guarda a URL no `content` e o player baixa os
+ * bytes via `mods:applyConfig`.
+ *
+ * Endpoint: PUT /configs/upload?filename=..&sha256=..  (corpo = bytes crus) -> { url, key }
+ *
+ * Manda os BYTES, não base64: o POST antigo embrulhava o arquivo num JSON e o Worker
+ * segurava várias cópias dele na memória — com muitas configs em paralelo isso estourava
+ * o limite de 128MB do isolate. O `sha256` (dos bytes) vai na query porque o Worker
+ * precisa dele antes do corpo: forma a key content-addressed E é validado pelo próprio
+ * R2, que recusa a gravação se os bytes recebidos não baterem.
+ *
+ * Para config que já está em ARQUIVO no disco, prefira `window.glitnir.configs
+ * .uploadFileStream`: lá os bytes vão direto do disco pro socket, sem passar pelo
+ * renderer. Esta função é para conteúdo que já está em memória.
  */
 export async function uploadConfig(
   token: string,
   filename: string,
-  contentBase64: string,
+  // Uint8Array<ArrayBuffer> (e não Uint8Array): o TS 5.7+ distingue buffer normal de
+  // SharedArrayBuffer, e só o primeiro serve como corpo de fetch / entrada do digest.
+  bytes: Uint8Array<ArrayBuffer>,
   backendUrl?: string,
 ): Promise<{ url: string; key: string }> {
-  const res = await fetch(`${base(backendUrl)}/configs/upload`, {
-    method: 'POST',
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  const sha256 = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
+  const q = `filename=${encodeURIComponent(filename)}&sha256=${sha256}`
+  const res = await fetch(`${base(backendUrl)}/configs/upload?${q}`, {
+    method: 'PUT',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/octet-stream',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ filename, content: contentBase64 }),
+    // Body de tipo BufferSource: o fetch define Content-Length sozinho. Não trocar por
+    // ReadableStream — aí iria chunked, e o R2 recusa stream sem tamanho conhecido.
+    body: bytes,
   })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
-    throw new Error((data as any).error || 'Falha ao enviar config binário')
+    throw new Error((data as any).error || 'Falha ao enviar config')
   }
   return res.json() as Promise<{ url: string; key: string }>
 }

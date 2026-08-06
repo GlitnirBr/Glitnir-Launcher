@@ -196,11 +196,13 @@ declare global {
         pickAndImportR2File: () => Promise<{ success: boolean; mods?: { namespace: string; name: string; version: string }[]; configs?: { filename: string; installPath: string; content?: string; contentBase64?: string }[]; error?: string } | null>
         openLog: (args: { valheimPath: string; profile?: string }) => Promise<{ success: boolean; error?: string }>
       }
-      /** Pacotes de config em .zip (ex.: texturas): upload em partes feito no main process. */
+      /** Configs enviados ao R2 pelo main process, sempre em streaming (o renderer não toca nos bytes). */
       configs: {
         /** Abre o diálogo do SO. `entries` = arquivos dentro do zip; `error` quando não é um zip válido. */
         pickZip: () => Promise<{ token: string; filename: string; size: number; entries: number } | { error: string } | null>
         uploadZipStream: (args: { token: string; backendUrl: string; authToken: string }) => Promise<{ success: boolean; filename?: string; url?: string; sha256?: string; error?: string }>
+        /** Sobe um config do disco em PUT único streamado. Caminho padrão para config vindo de arquivo. */
+        uploadFileStream: (args: { filePath: string; filename: string; backendUrl: string; authToken: string }) => Promise<{ success: boolean; url?: string; sha256?: string; error?: string }>
         onUploadProgress: (callback: (data: { filename: string; sent: number; total: number }) => void) => void
         offUploadProgress: () => void
       }

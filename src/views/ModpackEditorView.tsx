@@ -633,8 +633,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setLocalSelectedFile(filename)
     setLocalFileContent('')
     setLocalUploadError('')
-    // Binário não é lido como texto (corromperia e o preview é inútil) — os bytes são
-    // lidos só na hora de enviar ao R2, via fs.readFileBase64 em handleAddLocalToModpack.
+    // Binário não é lido como texto (corromperia e o preview é inútil) — os bytes só são
+    // lidos na hora de enviar ao R2, e direto do disco pelo main process
+    // (configs.uploadFileStream em handleAddLocalToModpack); nunca passam por aqui.
     if (isBinaryConfigPath(filename)) return
     setLocalFileLoading(true)
     const result = await window.glitnir.fs.readFile({ filePath: localFilePath(filename) })
@@ -670,11 +671,16 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       setLocalUploading(true)
       setLocalUploadError('')
       try {
-        const read = await window.glitnir.fs.readFileBase64({ filePath: localFilePath(localSelectedFile) })
-        if (!read.success || !read.content) throw new Error(read.error || 'Falha ao ler o arquivo')
         // Basename: o backend exige nome simples (sem `/`) na key do R2. O installPath
         // preserva a subpasta pra o player gravar no lugar certo.
-        const { url } = await uploadConfig(adminToken, configUploadName(localSelectedFile), read.content, backendUrl)
+        const up = await window.glitnir.configs.uploadFileStream({
+          filePath: localFilePath(localSelectedFile),
+          filename: configUploadName(localSelectedFile),
+          backendUrl,
+          authToken: adminToken,
+        })
+        if (!up.success || !up.url) throw new Error(up.error || 'Falha ao enviar o arquivo')
+        const url = up.url
         // Substitui uma entrada existente com o mesmo installPath (ex.: corrigir um
         // binário antes corrompido) em vez de só pular.
         setModpackConfigs(prev => {
@@ -737,10 +743,14 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         if (isBinaryConfigPath(f)) {
           if (/\.zip$/i.test(f)) { skippedZip.push(f); continue }
           if (!adminToken) { skippedNoToken.push(f); continue }
-          const read = await window.glitnir.fs.readFileBase64({ filePath: localFilePath(f) })
-          if (!read.success || !read.content) throw new Error(read.error || 'falha ao ler')
-          const { url } = await uploadConfig(adminToken, configUploadName(f), read.content, backendUrl)
-          added.push({ mod: '', filename: f, installPath, content: url })
+          const up = await window.glitnir.configs.uploadFileStream({
+            filePath: localFilePath(f),
+            filename: configUploadName(f),
+            backendUrl,
+            authToken: adminToken,
+          })
+          if (!up.success || !up.url) throw new Error(up.error || 'falha ao enviar')
+          added.push({ mod: '', filename: f, installPath, content: up.url })
         } else {
           const read = await window.glitnir.fs.readFile({ filePath: localFilePath(f) })
           if (!read.success) throw new Error(read.error || 'falha ao ler')
@@ -929,7 +939,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         // subir — conta como pulado e avisa no final (mods/text seguem normalmente).
         if (!adminToken) { skippedBinaries++; continue }
         try {
-          const { url } = await uploadConfig(adminToken, configUploadName(cfg.installPath), cfg.contentBase64, backendUrl)
+          const { url } = await uploadConfig(adminToken, configUploadName(cfg.installPath), base64ToBytes(cfg.contentBase64), backendUrl)
           newConfigs.push({ mod: matchMod(cfg.filename), filename: cfg.filename, installPath: cfg.installPath, content: url })
         } catch {
           skippedBinaries++
@@ -1017,13 +1027,12 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
    */
   const configUploadName = (installPath: string) =>
     (installPath.split(/[\\/]/).pop() || installPath).replace(/[^A-Za-z0-9._-]+/g, '_')
-  /** Base64 dos BYTES UTF-8 de um texto (o backend faz atob→bytes; texto = bytes UTF-8). */
-  function base64Utf8(s: string): string {
-    const bytes = new TextEncoder().encode(s)
-    let bin = ''
-    const CHUNK = 0x8000
-    for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
-    return btoa(bin)
+  /** Base64 -> bytes crus, para o conteúdo que chega já codificado (ex.: import de código R2). */
+  function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+    const bin = atob(b64)
+    const out = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+    return out
   }
 
   /**
@@ -1085,11 +1094,16 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         tick(`Enviando ${baseName(c.installPath)} ao R2…`)
         const rel = c.installPath.replace(/^BepInEx[\\/]config[\\/]/, '')
         try {
-          const read = await window.glitnir.fs.readFileBase64({ filePath: localFilePath(rel) })
-          if (!read.success || !read.content) {
-            unresolved.push({ installPath: c.installPath, reason: read.error || 'arquivo não encontrado no disco' })
+          const up = await window.glitnir.configs.uploadFileStream({
+            filePath: localFilePath(rel),
+            filename: configUploadName(c.installPath),
+            backendUrl,
+            authToken: adminToken,
+          })
+          if (!up.success || !up.url) {
+            unresolved.push({ installPath: c.installPath, reason: up.error || 'arquivo não encontrado no disco' })
           } else {
-            const { url } = await uploadConfig(adminToken, configUploadName(c.installPath), read.content, backendUrl)
+            const url = up.url
             configs = configs.map(x => x.installPath === c.installPath ? { ...x, content: url } : x)
           }
         } catch (err: any) {
@@ -1115,7 +1129,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         }
         tick(`Enviando ${baseName(heaviest.installPath)} ao R2…`)
         try {
-          const { url } = await uploadConfig(adminToken, configUploadName(heaviest.installPath), base64Utf8(heaviest.content || ''), backendUrl)
+          // Texto → bytes UTF-8 direto: sem base64 no caminho, o Worker só repassa ao R2.
+          const bytes = new TextEncoder().encode(heaviest.content || '')
+          const { url } = await uploadConfig(adminToken, configUploadName(heaviest.installPath), bytes, backendUrl)
           configs = configs.map(x => x.installPath === heaviest.installPath ? { ...x, content: url } : x)
         } catch (err: any) {
           unresolved.push({ installPath: heaviest.installPath, reason: 'falha ao subir texto ao R2: ' + (err.message || '') })
