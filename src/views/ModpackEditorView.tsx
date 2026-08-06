@@ -129,6 +129,10 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [localFileSaved, setLocalFileSaved] = useState(false)
   const [localUploading, setLocalUploading] = useState(false)
   const [localUploadError, setLocalUploadError] = useState('')
+  // "Adicionar tudo": percorre a lista inteira de configs locais de uma vez.
+  const [localAddAllRunning, setLocalAddAllRunning] = useState(false)
+  const [localAddAllProgress, setLocalAddAllProgress] = useState({ done: 0, total: 0 })
+  const [localAddAllResult, setLocalAddAllResult] = useState('')
 
   // Pacote de configs em .zip (ex.: texturas): sobe em partes pelo main process e entra no
   // modpack como um config com `extract: true` — o player baixa e o launcher extrai no perfil.
@@ -145,6 +149,42 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   // The draft-sync effect must not write until after the first fetch, otherwise
   // stale state gets saved as the new target's draft before the server responds.
   const loadedTargets = useRef<Set<Target>>(new Set())
+
+  // Atalho pro fim da página: com muitos mods/configs o botão Publicar fica longe.
+  // O scroll real acontece no <main className="layout-main"> do Layout, não aqui.
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [showScrollDown, setShowScrollDown] = useState(false)
+
+  const getScroller = useCallback(
+    () => (rootRef.current?.closest('.layout-main') as HTMLElement | null) ?? null,
+    [],
+  )
+
+  useEffect(() => {
+    const scroller = getScroller()
+    const content = rootRef.current
+    if (!scroller || !content) return
+    const update = () => {
+      const remaining = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+      setShowScrollDown(remaining > 300)
+    }
+    update()
+    scroller.addEventListener('scroll', update, { passive: true })
+    // A página cresce/encolhe conforme mods e configs entram na lista — sem o observer
+    // o botão só apareceria depois do primeiro scroll.
+    const ro = new ResizeObserver(update)
+    ro.observe(content)
+    ro.observe(scroller)
+    return () => {
+      scroller.removeEventListener('scroll', update)
+      ro.disconnect()
+    }
+  }, [getScroller])
+
+  function scrollToBottom() {
+    const scroller = getScroller()
+    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' })
+  }
 
   // Pre-fill localConfigDir from saved config on mount
   useEffect(() => {
@@ -572,6 +612,17 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     setLocalConfigLoading(false)
   }
 
+  /**
+   * Quantos arquivos listados ainda não estão no modpack (rótulo do "Adicionar tudo").
+   * Mesmo critério de `handleAddAllLocalToModpack`, pra o número bater com o que ele faz.
+   */
+  const localPendingCount = useMemo(
+    () => localConfigFiles.filter(f =>
+      !modpackConfigs.some(c => c.filename === f || c.installPath === `BepInEx/config/${f}`)
+    ).length,
+    [localConfigFiles, modpackConfigs],
+  )
+
   function localFilePath(filename: string) {
     const dir = localConfigDir.replace(/[\\/]+$/, '')
     const sep = dir.includes('\\') ? '\\' : '/'
@@ -647,6 +698,74 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       installPath,
       content: localFileContent,
     }])
+  }
+
+  /**
+   * Adiciona de uma vez os arquivos listados que AINDA NÃO estão no modpack.
+   *
+   * Nunca toca no que já está lá: quem já foi adicionado é pulado inteiro — não
+   * duplica, não relê do disco e (no caso de binário) não reenvia pro R2. Mesma
+   * regra do botão individual, que fica desabilitado como "✓ No modpack". Atualizar
+   * um config já adicionado continua sendo feito na aba Configs (ou removendo e
+   * adicionando de novo).
+   *
+   * Texto entra embutido; binário sobe pro R2 (precisa de login de admin). `.zip` é
+   * pulado de propósito — por aqui viraria um arquivo solto e carregado inteiro na
+   * memória; o card "Pacote de Configs (.zip)" é o caminho certo pra pacote extraível.
+   */
+  async function handleAddAllLocalToModpack() {
+    // Pula por filename (mesmo critério do selo "no modpack" e do botão individual) e
+    // também por installPath, pra nunca sobrescrever uma entrada já existente.
+    const isInModpack = (f: string) =>
+      modpackConfigs.some(c => c.filename === f || c.installPath === `BepInEx/config/${f}`)
+    const pending = localConfigFiles.filter(f => !isInModpack(f))
+    if (pending.length === 0) return
+    setLocalAddAllRunning(true)
+    setLocalUploadError('')
+    setLocalAddAllResult('')
+    setLocalAddAllProgress({ done: 0, total: pending.length })
+
+    const added: ModConfig[] = []
+    const skippedZip: string[] = []
+    const skippedNoToken: string[] = []
+    const skippedEmpty: string[] = []
+    const failed: string[] = []
+
+    for (const f of pending) {
+      const installPath = `BepInEx/config/${f}`
+      try {
+        if (isBinaryConfigPath(f)) {
+          if (/\.zip$/i.test(f)) { skippedZip.push(f); continue }
+          if (!adminToken) { skippedNoToken.push(f); continue }
+          const read = await window.glitnir.fs.readFileBase64({ filePath: localFilePath(f) })
+          if (!read.success || !read.content) throw new Error(read.error || 'falha ao ler')
+          const { url } = await uploadConfig(adminToken, configUploadName(f), read.content, backendUrl)
+          added.push({ mod: '', filename: f, installPath, content: url })
+        } else {
+          const read = await window.glitnir.fs.readFile({ filePath: localFilePath(f) })
+          if (!read.success) throw new Error(read.error || 'falha ao ler')
+          // Arquivo vazio é pulado igual no botão individual (`if (!localFileContent) return`):
+          // publicar um config vazio zeraria o do player.
+          if (!read.content) { skippedEmpty.push(f); continue }
+          added.push({ mod: '', filename: f, installPath, content: read.content })
+        }
+      } catch {
+        failed.push(f)
+      } finally {
+        setLocalAddAllProgress(p => ({ ...p, done: p.done + 1 }))
+      }
+    }
+
+    // Append puro: `pending` já garantiu que nada aqui colide com o que está no modpack.
+    if (added.length > 0) setModpackConfigs(prev => [...prev, ...added])
+
+    const parts = [`${added.length} adicionado${added.length === 1 ? '' : 's'}`]
+    if (skippedNoToken.length) parts.push(`${skippedNoToken.length} binário(s) pulado(s) — faça login de admin`)
+    if (skippedZip.length) parts.push(`${skippedZip.length} .zip pulado(s) — use o card "Pacote de Configs (.zip)"`)
+    if (skippedEmpty.length) parts.push(`${skippedEmpty.length} vazio(s) pulado(s)`)
+    if (failed.length) parts.push(`${failed.length} com erro: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '...' : ''}`)
+    setLocalAddAllResult(parts.join(' · '))
+    setLocalAddAllRunning(false)
   }
 
   /** Normaliza a pasta destino do zip: relativa ao perfil, sem barras nas pontas. */
@@ -1105,7 +1224,17 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   ) : null
 
   return (
-    <div className="admin-view modpack-editor">
+    <div className="admin-view modpack-editor" ref={rootRef}>
+      {showScrollDown && (
+        <button
+          type="button"
+          className="scroll-to-bottom-fab"
+          onClick={scrollToBottom}
+          title="Ir para o fim da página (botão Publicar)"
+        >
+          ↓ Ir para Publicar
+        </button>
+      )}
       <div className="admin-header">
         <h1>Editor de Modpack</h1>
         <p className="text-secondary">Navegue mods do Thunderstore e monte seu modpack.</p>
@@ -1863,6 +1992,21 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                   {/* File list */}
                   <div style={{ width: 220, flexShrink: 0 }}>
                     <p className="text-muted" style={{ fontSize: 11, marginBottom: 4 }}>{localConfigFiles.length} arquivo{localConfigFiles.length > 1 ? 's' : ''}</p>
+                    {localPendingCount > 0 && (
+                      <button
+                        className="btn-secondary"
+                        style={{ fontSize: 12, width: '100%', marginBottom: 6 }}
+                        onClick={handleAddAllLocalToModpack}
+                        disabled={localAddAllRunning}
+                      >
+                        {localAddAllRunning
+                          ? `Adicionando... ${localAddAllProgress.done}/${localAddAllProgress.total}`
+                          : `+ Adicionar tudo (${localPendingCount})`}
+                      </button>
+                    )}
+                    {localAddAllResult && (
+                      <p className="text-muted" style={{ fontSize: 11, marginBottom: 6 }}>{localAddAllResult}</p>
+                    )}
                     <div className="cfg-file-list" style={{ maxHeight: 320, overflowY: 'auto' }}>
                       {localConfigFiles.map(f => {
                         const inModpack = modpackConfigs.some(c => c.filename === f)
@@ -1875,7 +2019,12 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                             style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}
                           >
                             <span className="cfg-file-name">{f}</span>
-                            {inModpack && <span className="text-muted" style={{ fontSize: 10 }}>✓ no modpack</span>}
+                            <span
+                              className={inModpack ? 'cfg-file-status-in' : 'cfg-file-status-out'}
+                              style={{ fontSize: 10 }}
+                            >
+                              {inModpack ? '✓ no modpack' : '✕ não está no modpack'}
+                            </span>
                           </button>
                         )
                       })}

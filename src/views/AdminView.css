@@ -679,6 +679,41 @@
   font-family: var(--font-mono);
 }
 
+/* Atalho flutuante pro fim da página (botão Publicar). Fixo na viewport porque quem
+   rola é o .layout-main, não este container. */
+.scroll-to-bottom-fab {
+  position: fixed;
+  right: 28px;
+  bottom: 24px;
+  z-index: 50;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-content);
+  border: 1px solid var(--accent-blue);
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.scroll-to-bottom-fab:hover {
+  background: rgba(58, 123, 213, 0.25);
+  transform: translateY(-1px);
+}
+
+/* Status do arquivo local em relação ao modpack — verde já está, vermelho ainda não. */
+.cfg-file-status-in {
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+.cfg-file-status-out {
+  color: var(--accent-red);
+  font-weight: 600;
+}
+
 .server-status-info {
   display: flex;
   align-items: center;
