@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Config, Mod, ModConfig, Modpack, ModpackTarget } from '../types'
 import { fetchAllMods, clearModsCache, ThunderstoreMod, getDownloadUrl } from '../utils/thunderstoreApi'
 import { fetchModpackFromUrl, buildModpackRawUrl, isBinaryConfigPath, isTextConfigPath, byteLength, stripModToReference } from '../utils/modManager'
-import { getAdminModpack, getPublicModpack, publishModpack, listPrivateMods, uploadConfig, DEFAULT_BACKEND_URL } from '../utils/backendApi'
+import { getAdminModpack, getPublicModpack, publishModpack, listPrivateMods, uploadConfig, normalizeBackendUrl, DEFAULT_BACKEND_URL } from '../utils/backendApi'
 import ErrorBoundary from '../components/ErrorBoundary'
 import './AdminView.css'
 
@@ -195,6 +195,16 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   }, [])
 
   const backendUrl = config.backendUrl || ''
+  /**
+   * URL do backend JÁ RESOLVIDA, para toda chamada que streama pelo main process
+   * (mods:uploadPrivateModStream, configs:uploadZipStream, configs:uploadFileStream).
+   *
+   * O main não conhece o DEFAULT_BACKEND_URL — esse fallback é só do cliente, aplicado
+   * dentro de `base()` no backendApi.ts — então URL vazia chega lá e volta como
+   * "Backend inválido". Passa por normalizeBackendUrl também: uma URL legada salva no
+   * config passaria o regex do main e só morreria depois, num worker fora do ar.
+   */
+  const streamBackendUrl = normalizeBackendUrl(backendUrl) || DEFAULT_BACKEND_URL
   const modpackRepo = config.modpackRepo || ''
   const modpackBranch = config.modpackBranch || 'main'
 
@@ -475,12 +485,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       setUploadProgress(total > 0 ? Math.round((sent / total) * 100) : 0)
     })
     try {
-      // O main process não conhece o DEFAULT_BACKEND_URL (fallback só do cliente) e rejeita
-      // URL vazia com "Backend inválido". Resolve aqui pro default quando o config está vazio,
-      // igual ao base() usado no resto das chamadas de backend.
       const res = await window.glitnir.mods.uploadPrivateModStream({
         token: pendingFile.token,
-        backendUrl: (backendUrl || '').trim() || DEFAULT_BACKEND_URL,
+        backendUrl: streamBackendUrl,
         authToken: adminToken,
       })
       if (!res.success || !res.filename) throw new Error(res.error || 'Falha no upload')
@@ -676,7 +683,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
         const up = await window.glitnir.configs.uploadFileStream({
           filePath: localFilePath(localSelectedFile),
           filename: configUploadName(localSelectedFile),
-          backendUrl,
+          backendUrl: streamBackendUrl,
           authToken: adminToken,
         })
         if (!up.success || !up.url) throw new Error(up.error || 'Falha ao enviar o arquivo')
@@ -746,7 +753,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
           const up = await window.glitnir.configs.uploadFileStream({
             filePath: localFilePath(f),
             filename: configUploadName(f),
-            backendUrl,
+            backendUrl: streamBackendUrl,
             authToken: adminToken,
           })
           if (!up.success || !up.url) throw new Error(up.error || 'falha ao enviar')
@@ -804,10 +811,9 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       setZipProgress(total > 0 ? Math.round((sent / total) * 100) : 0)
     })
     try {
-      // Igual ao upload de mod privado: o main não conhece o DEFAULT_BACKEND_URL do cliente.
       const res = await window.glitnir.configs.uploadZipStream({
         token: zipPick.token,
-        backendUrl: (backendUrl || '').trim() || DEFAULT_BACKEND_URL,
+        backendUrl: streamBackendUrl,
         authToken: adminToken,
       })
       if (!res.success || !res.url) throw new Error(res.error || 'Falha no upload')
@@ -1097,7 +1103,7 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
           const up = await window.glitnir.configs.uploadFileStream({
             filePath: localFilePath(rel),
             filename: configUploadName(c.installPath),
-            backendUrl,
+            backendUrl: streamBackendUrl,
             authToken: adminToken,
           })
           if (!up.success || !up.url) {
