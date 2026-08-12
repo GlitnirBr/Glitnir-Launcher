@@ -32,8 +32,29 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      # Mesmo esquema do release.yml: cache do binário do electron + retry no npm ci, porque o
+      # postinstall dele baixa ~90 MB do GitHub e o @electron/get não retenta sozinho.
+      - name: Cache do binário do Electron
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/electron
+          key: electron-${{ matrix.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ matrix.os }}-
+
       - name: Install dependencies
-        run: npm ci
+        shell: bash
+        env:
+          ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+        run: |
+          for i in 1 2 3; do
+            npm ci && exit 0
+            if [ "$i" -lt 3 ]; then
+              echo "::warning::npm ci falhou (tentativa $i/3) — nova tentativa em $((i * 15))s"
+              sleep $((i * 15))
+            fi
+          done
+          echo "::error::npm ci falhou nas 3 tentativas"
+          exit 1
 
       - name: Build app
         run: npm run build -- --publish never

@@ -44,8 +44,33 @@ jobs:
         shell: bash
         run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
 
+      # O postinstall do electron baixa o binário (~90 MB) do GitHub. Com o cache quente esse
+      # download nem acontece — que é a melhor defesa contra o "socket hang up" que já derrubou
+      # a release. A key segue o package-lock: mudou a versão do electron, baixa de novo.
+      - name: Cache do binário do Electron
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/electron
+          key: electron-${{ matrix.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ matrix.os }}-
+
+      # Retry explícito: o @electron/get NÃO retenta, então uma falha de rede transitória
+      # (socket hang up no meio do zip) reprova o job todo. `npm ci` apaga node_modules antes,
+      # então cada tentativa começa limpa. bash nas duas plataformas (no Windows vem o Git Bash).
       - name: Instalar dependências
-        run: npm ci
+        shell: bash
+        env:
+          ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+        run: |
+          for i in 1 2 3; do
+            npm ci && exit 0
+            if [ "$i" -lt 3 ]; then
+              echo "::warning::npm ci falhou (tentativa $i/3) — nova tentativa em $((i * 15))s"
+              sleep $((i * 15))
+            fi
+          done
+          echo "::error::npm ci falhou nas 3 tentativas"
+          exit 1
 
       - name: Build
         run: npm run build -- --publish never
