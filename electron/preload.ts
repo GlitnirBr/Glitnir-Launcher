@@ -98,6 +98,8 @@ contextBridge.exposeInMainWorld('glitnir', {
     listDir: (args: { dir: string }) => ipcRenderer.invoke('fs:listDir', args),
     readFile: (args: { filePath: string }) => ipcRenderer.invoke('fs:readFile', args),
     readFileBase64: (args: { filePath: string }) => ipcRenderer.invoke('fs:readFileBase64', args),
+    hashFile: (args: { filePath: string }) => ipcRenderer.invoke('fs:hashFile', args),
+    allowDroppedConfigDir: (args: { dirPath: string }) => ipcRenderer.invoke('fs:allowDroppedConfigDir', args),
     writeFile: (args: { filePath: string; content: string }) => ipcRenderer.invoke('fs:writeFile', args),
     pickJsonFile: () => ipcRenderer.invoke('fs:pickJsonFile'),
     saveFileDialog: (args: { filename: string; content: string }) => ipcRenderer.invoke('fs:saveFileDialog', args),

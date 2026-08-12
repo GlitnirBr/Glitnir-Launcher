@@ -37,6 +37,33 @@ type PackDraft = {
 
 const PAGE_SIZE = 50
 
+/** Prefixo de installPath de tudo que vive na pasta de configs do perfil. */
+const CONFIG_PREFIX = 'BepInEx/config/'
+
+/**
+ * Plano de espelhamento: o que muda no modpack para ele ficar IGUAL à pasta local do admin.
+ * O installPath de cada entrada vem da posição do arquivo DENTRO da pasta escolhida, então
+ * `Icons/x.png` no disco vira `BepInEx/config/Icons/x.png` no player — é isso que garante que
+ * a estrutura de pastas seja replicada em vez de tudo cair solto na raiz de config/.
+ */
+type MirrorPlan = {
+  /** Não está no modpack ainda. */
+  toAdd: { rel: string; binary: boolean; sha256?: string }[]
+  /** Já está, mas o conteúdo do disco é outro (texto diferente ou hash de binário diferente). */
+  toUpdate: { rel: string; binary: boolean; sha256?: string }[]
+  /** Já está e é idêntico — nem lê nem reenvia. */
+  unchanged: number
+  /** Está no modpack sob BepInEx/config/ mas NÃO existe mais na pasta local. */
+  toRemove: string[]
+  /** Ficaram de fora: .zip (usar o card de pacote), vazios, extensão não reconhecida. */
+  skippedZip: string[]
+  skippedEmpty: string[]
+  skippedUnknownExt: string[]
+  /** Entradas preservadas sem análise: pacotes .zip extraíveis e configs fora de BepInEx/config/. */
+  keptExtract: number
+  keptOutside: number
+}
+
 export default function ModpackEditorView({ config, adminToken, onSave }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('online')
   const [target, setTarget] = useState<Target>('main')
@@ -133,6 +160,22 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
   const [localAddAllRunning, setLocalAddAllRunning] = useState(false)
   const [localAddAllProgress, setLocalAddAllProgress] = useState({ done: 0, total: 0 })
   const [localAddAllResult, setLocalAddAllResult] = useState('')
+
+  /** Realce da área de drop enquanto a pasta está sendo arrastada por cima. */
+  const [localDirDragOver, setLocalDirDragOver] = useState(false)
+  // Arquivos da pasta cuja extensão não é reconhecida como config (vêm do fs.listDir).
+  // Não entram no modpack, mas contam como "existe no disco" no espelhamento.
+  const [localUnknownFiles, setLocalUnknownFiles] = useState<string[]>([])
+  /**
+   * Espelhamento da pasta local no modpack. Fluxo em DUAS etapas de propósito: o plano é
+   * calculado e mostrado (inclusive o que vai ser REMOVIDO) e só executa no segundo clique —
+   * espelhar apaga entradas, e apagar 171 configs por engano vira estrago em 100+ jogadores.
+   */
+  const [mirrorPlan, setMirrorPlan] = useState<MirrorPlan | null>(null)
+  const [mirrorRunning, setMirrorRunning] = useState(false)
+  const [mirrorProgress, setMirrorProgress] = useState({ done: 0, total: 0 })
+  const [mirrorResult, setMirrorResult] = useState('')
+  const [mirrorError, setMirrorError] = useState('')
 
   // Pacote de configs em .zip (ex.: texturas): sobe em partes pelo main process e entra no
   // modpack como um config com `extract: true` — o player baixa e o launcher extrai no perfil.
@@ -597,12 +640,22 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
       setLocalConfigError('')
       setLocalSelectedFile('')
       setLocalFileContent('')
+      // Pasta nova: a lista anterior (e qualquer plano de espelhamento feito sobre ela) não vale
+      // mais — aplicar um plano da pasta antiga removeria configs com base em outro diretório.
+      setLocalUnknownFiles([])
+      setMirrorPlan(null)
+      setMirrorResult('')
+      setMirrorError('')
       onSave?.({ adminProfilePath: dir })
     }
   }
 
-  async function handleListLocalConfigs() {
-    const dir = localConfigDir.trim()
+  /**
+   * Lista os configs de uma pasta. Recebe o caminho por parâmetro (em vez de ler o estado)
+   * porque o drop precisa listar a pasta arrastada no MESMO clique — o setLocalConfigDir
+   * ainda não teria chegado ao estado.
+   */
+  async function listLocalConfigs(dir: string) {
     if (!dir) return
     setLocalConfigLoading(true)
     setLocalConfigError('')
@@ -612,11 +665,53 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     const result = await window.glitnir.fs.listDir({ dir })
     if (result?.success) {
       setLocalConfigFiles(result.files ?? [])
+      setLocalUnknownFiles(result.unknown ?? [])
+      // Relistar invalida um plano de espelhamento anterior: ele foi calculado sobre a
+      // lista antiga e aplicá-lo agora removeria/adicionaria com base em dados velhos.
+      setMirrorPlan(null)
+      setMirrorResult('')
+      setMirrorError('')
       onSave?.({ adminProfilePath: dir })
     } else {
       setLocalConfigError(result?.error || 'Erro ao listar arquivos')
     }
     setLocalConfigLoading(false)
+  }
+
+  const handleListLocalConfigs = () => listLocalConfigs(localConfigDir.trim())
+
+  /**
+   * Arrastar a pasta `config` para dentro do card. O caminho da pasta vem do `path` do File
+   * (Electron ≤31 preenche isso no renderer; foi removido no 32, onde o certo é webUtils).
+   * Como o drop não passa pelo diálogo do SO, o main precisa liberar a pasta explicitamente
+   * (fs:allowDroppedConfigDir) antes de qualquer leitura — e ele só aceita pasta chamada
+   * `config`, o que também barra o erro de arrastar a `BepInEx` inteira.
+   */
+  async function handleDropLocalDir(e: React.DragEvent) {
+    e.preventDefault()
+    setLocalDirDragOver(false)
+    setLocalConfigError('')
+
+    // Duas formas de chegar ao File: `files` (o normal) e `items[].getAsFile()` — dependendo
+    // da versão do Chromium, uma PASTA arrastada aparece só numa das duas.
+    const fromFiles = e.dataTransfer?.files?.[0] as (File & { path?: string }) | undefined
+    const fromItems = Array.from(e.dataTransfer?.items || [])
+      .filter(i => i.kind === 'file')
+      .map(i => i.getAsFile() as (File & { path?: string }) | null)
+      .find(f => !!f?.path)
+    const dirPath = fromFiles?.path || fromItems?.path
+    if (!dirPath) {
+      setLocalConfigError('Não foi possível ler o caminho da pasta arrastada. Use o botão Buscar.')
+      return
+    }
+
+    const allowed = await window.glitnir.fs.allowDroppedConfigDir({ dirPath })
+    if (!allowed?.success || !allowed.dirPath) {
+      setLocalConfigError(allowed?.error || 'Não foi possível usar essa pasta')
+      return
+    }
+    setLocalConfigDir(allowed.dirPath)
+    await listLocalConfigs(allowed.dirPath)
   }
 
   /**
@@ -783,6 +878,171 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
     if (failed.length) parts.push(`${failed.length} com erro: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '...' : ''}`)
     setLocalAddAllResult(parts.join(' · '))
     setLocalAddAllRunning(false)
+  }
+
+  /**
+   * ── Espelhar pasta local no modpack ────────────────────────────────────────────────────
+   * Etapa 1 (plano): compara a pasta escolhida com os configs do modpack e diz exatamente o
+   * que vai mudar, sem tocar em nada. Só lê do disco — nenhum upload acontece aqui.
+   *
+   * O mapeamento é posicional: `Icons/x.png` na pasta → `BepInEx/config/Icons/x.png` no perfil
+   * do player. É o que faz a estrutura ser replicada igual, em vez de cair solto na raiz.
+   *
+   * Binário não é lido: o hash sai do main process em streaming e é comparado com o `{sha8}-`
+   * da URL do R2 que já está no modpack (a key é content-addressed). Igual = não reenvia.
+   */
+  async function handlePlanMirror() {
+    if (!localConfigDir.trim()) return
+    setMirrorRunning(true)
+    setMirrorError('')
+    setMirrorResult('')
+    setMirrorPlan(null)
+    setMirrorProgress({ done: 0, total: localConfigFiles.length })
+
+    try {
+      const byPath = new Map(modpackConfigs.filter(c => !c.extract).map(c => [c.installPath, c]))
+      const plan: MirrorPlan = {
+        toAdd: [], toUpdate: [], unchanged: 0, toRemove: [],
+        skippedZip: [], skippedEmpty: [], skippedUnknownExt: [...localUnknownFiles],
+        keptExtract: modpackConfigs.filter(c => c.extract).length,
+        keptOutside: modpackConfigs.filter(c => !c.extract && !c.installPath.startsWith(CONFIG_PREFIX)).length,
+      }
+
+      for (const rel of localConfigFiles) {
+        const existing = byPath.get(CONFIG_PREFIX + rel)
+        try {
+          // .zip solto viraria um arquivo inerte no perfil; pacote extraível tem card próprio.
+          if (/\.zip$/i.test(rel)) { plan.skippedZip.push(rel); continue }
+
+          if (isBinaryConfigPath(rel)) {
+            const h = await window.glitnir.fs.hashFile({ filePath: localFilePath(rel) })
+            if (!h.success || !h.sha256) throw new Error(h.error || 'falha ao ler')
+            if (!h.size) { plan.skippedEmpty.push(rel); continue }
+            const sha8 = h.sha256.slice(0, 8)
+            if (existing && isUrlContent(existing) && existing.content.includes(`/configs/${sha8}-`)) {
+              plan.unchanged++
+            } else if (existing) {
+              plan.toUpdate.push({ rel, binary: true, sha256: h.sha256 })
+            } else {
+              plan.toAdd.push({ rel, binary: true, sha256: h.sha256 })
+            }
+          } else if (existing && isUrlContent(existing)) {
+            // Texto GRANDE que o publish já mandou pro R2: o content virou URL, então comparar
+            // com o texto do disco daria "diferente" sempre e o espelho re-inlinaria (e o publish
+            // re-subiria) esses arquivos a cada vez. A key do R2 é content-addressed do mesmo
+            // arquivo, então o hash resolve igual ao caso binário.
+            const h = await window.glitnir.fs.hashFile({ filePath: localFilePath(rel) })
+            if (!h.success || !h.sha256) throw new Error(h.error || 'falha ao ler')
+            if (!h.size) { plan.skippedEmpty.push(rel); continue }
+            if (existing.content.includes(`/configs/${h.sha256.slice(0, 8)}-`)) plan.unchanged++
+            else plan.toUpdate.push({ rel, binary: false })
+          } else {
+            const read = await window.glitnir.fs.readFile({ filePath: localFilePath(rel) })
+            if (!read.success) throw new Error(read.error || 'falha ao ler')
+            if (!read.content) { plan.skippedEmpty.push(rel); continue }
+            if (existing && existing.content === read.content) plan.unchanged++
+            else if (existing) plan.toUpdate.push({ rel, binary: false })
+            else plan.toAdd.push({ rel, binary: false })
+          }
+        } finally {
+          setMirrorProgress(p => ({ ...p, done: p.done + 1 }))
+        }
+      }
+
+      // Sobrou no modpack e não existe na pasta = removido. Só considera o que a pasta
+      // REALMENTE representa: entradas fora de BepInEx/config/ e pacotes .zip não são
+      // arquivos desta pasta e ficam intactos. Extensão não reconhecida conta como
+      // existente (o arquivo está lá, só não foi analisado) pra não apagar a entrada dele.
+      const onDisk = new Set([...localConfigFiles, ...localUnknownFiles])
+      for (const c of modpackConfigs) {
+        if (c.extract || !c.installPath.startsWith(CONFIG_PREFIX)) continue
+        const rel = c.installPath.slice(CONFIG_PREFIX.length)
+        if (!onDisk.has(rel)) plan.toRemove.push(c.installPath)
+      }
+
+      setMirrorPlan(plan)
+    } catch (err: any) {
+      setMirrorError('Falha ao calcular o espelhamento: ' + (err?.message || ''))
+    } finally {
+      setMirrorRunning(false)
+    }
+  }
+
+  /**
+   * Etapa 2: executa o plano. Sobe ao R2 só os binários que mudaram, relê os textos que
+   * mudaram, e monta a lista final ordenada por installPath. Preserva o campo `mod`
+   * (informativo) das entradas que já existiam.
+   *
+   * Nada é publicado aqui: a alteração fica no rascunho do editor e vai pro ar no Publicar,
+   * que é onde o admin confere o resumo.
+   */
+  async function handleApplyMirror() {
+    const plan = mirrorPlan
+    if (!plan) return
+    const work = [...plan.toAdd, ...plan.toUpdate]
+    if (work.some(w => w.binary) && !adminToken) {
+      setMirrorError('Faça login de admin para enviar os configs binários ao R2.')
+      return
+    }
+
+    setMirrorRunning(true)
+    setMirrorError('')
+    setMirrorProgress({ done: 0, total: work.length })
+
+    const byPath = new Map(modpackConfigs.map(c => [c.installPath, c]))
+    const applied = new Map<string, ModConfig>()
+    const failed: string[] = []
+
+    for (const item of work) {
+      const installPath = CONFIG_PREFIX + item.rel
+      const prev = byPath.get(installPath)
+      try {
+        if (item.binary) {
+          const up = await window.glitnir.configs.uploadFileStream({
+            filePath: localFilePath(item.rel),
+            filename: configUploadName(item.rel),
+            backendUrl: streamBackendUrl,
+            authToken: adminToken!,
+          })
+          if (!up.success || !up.url) throw new Error(up.error || 'falha ao enviar')
+          applied.set(installPath, { mod: prev?.mod || '', filename: item.rel, installPath, content: up.url })
+        } else {
+          const read = await window.glitnir.fs.readFile({ filePath: localFilePath(item.rel) })
+          if (!read.success || !read.content) throw new Error(read.error || 'falha ao ler')
+          applied.set(installPath, { mod: prev?.mod || '', filename: item.rel, installPath, content: read.content })
+        }
+      } catch {
+        failed.push(item.rel)
+      } finally {
+        setMirrorProgress(p => ({ ...p, done: p.done + 1 }))
+      }
+    }
+
+    // Remoções só valem para o que o plano previu E que não acabou de ser reescrito.
+    // Um item que falhou o upload mantém a entrada ANTIGA (melhor um config desatualizado
+    // no player do que nenhum).
+    const removing = new Set(plan.toRemove)
+    setModpackConfigs(prev => {
+      const next = prev
+        .filter(c => !removing.has(c.installPath) || applied.has(c.installPath))
+        .map(c => applied.get(c.installPath) || c)
+      const existingPaths = new Set(next.map(c => c.installPath))
+      for (const [p, cfg] of applied) if (!existingPaths.has(p)) next.push(cfg)
+      return next.sort((a, b) => a.installPath.localeCompare(b.installPath))
+    })
+
+    const parts: string[] = []
+    const addedOk = plan.toAdd.filter(a => applied.has(CONFIG_PREFIX + a.rel)).length
+    const updatedOk = plan.toUpdate.filter(u => applied.has(CONFIG_PREFIX + u.rel)).length
+    if (addedOk) parts.push(`${addedOk} adicionado(s)`)
+    if (updatedOk) parts.push(`${updatedOk} atualizado(s)`)
+    if (plan.toRemove.length) parts.push(`${plan.toRemove.length} removido(s)`)
+    if (plan.unchanged) parts.push(`${plan.unchanged} sem mudança`)
+    if (failed.length) parts.push(`${failed.length} com erro: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`)
+    parts.push('revise e clique em Publicar')
+    setMirrorResult(parts.join(' · '))
+    setMirrorPlan(null)
+    setMirrorRunning(false)
   }
 
   /** Normaliza a pasta destino do zip: relativa ao perfil, sem barras nas pontas. */
@@ -1987,7 +2247,25 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
           <div className="admin-section card">
             <div className="card-header"><h3>Configs do Perfil Local</h3></div>
             <div className="card-body">
-              <div className="form-group">
+              {/* Arrastar a pasta `config` aqui equivale a escolhê-la no diálogo: o main libera
+                  a pasta (só aceita nome `config`) e a listagem roda na hora. */}
+              <div
+                className="form-group"
+                onDragOver={e => {
+                  e.preventDefault()
+                  // Sem dropEffect explícito o cursor pode aparecer como "não pode soltar aqui".
+                  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+                  setLocalDirDragOver(true)
+                }}
+                onDragLeave={() => setLocalDirDragOver(false)}
+                onDrop={handleDropLocalDir}
+                style={{
+                  border: `1px dashed ${localDirDragOver ? 'var(--color-primary, #4a9eda)' : 'transparent'}`,
+                  borderRadius: 6,
+                  padding: localDirDragOver ? 8 : 0,
+                  transition: 'padding 80ms',
+                }}
+              >
                 <label>Pasta BepInEx/config (r2modman)</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
@@ -2005,9 +2283,106 @@ export default function ModpackEditorView({ config, adminToken, onSave }: Props)
                     {localConfigLoading ? 'Listando...' : 'Listar'}
                   </button>
                 </div>
+                <p className="text-muted" style={{ fontSize: 11, marginTop: 4, marginBottom: 0 }}>
+                  {localDirDragOver
+                    ? 'Solte a pasta config aqui'
+                    : 'Ou arraste a pasta config (a que fica dentro de BepInEx) para cá.'}
+                </p>
               </div>
 
               {localConfigError && <p className="text-muted" style={{ color: 'var(--color-error, #e55)', fontSize: 13 }}>{localConfigError}</p>}
+
+              {/* Espelhar a pasta inteira: o installPath de cada config sai da posição do
+                  arquivo na pasta, então a estrutura de subpastas é replicada igual no player. */}
+              {localConfigFiles.length > 0 && (
+                <div className="form-group" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--color-border, #2a3a4a)' }}>
+                  <label>Espelhar esta pasta no modpack</label>
+                  <p className="text-muted" style={{ fontSize: 11, marginBottom: 6 }}>
+                    Deixa a lista de configs do modpack IGUAL a esta pasta: cada arquivo entra no caminho
+                    onde ele está aqui (<code>Icons/x.png</code> → <code>BepInEx/config/Icons/x.png</code>),
+                    o que mudou é atualizado e o que não existe mais aqui é removido. Limpe a pasta antes —
+                    o que estiver errado nela vai para todos os jogadores.
+                  </p>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button
+                      className="btn-secondary"
+                      style={{ fontSize: 12 }}
+                      onClick={handlePlanMirror}
+                      disabled={mirrorRunning}
+                    >
+                      {mirrorRunning && !mirrorPlan
+                        ? `Comparando... ${mirrorProgress.done}/${mirrorProgress.total}`
+                        : 'Comparar pasta com o modpack'}
+                    </button>
+                    {mirrorPlan && (
+                      <>
+                        <button
+                          className="btn-primary"
+                          style={{ fontSize: 12 }}
+                          onClick={handleApplyMirror}
+                          disabled={mirrorRunning || (
+                            mirrorPlan.toAdd.length + mirrorPlan.toUpdate.length + mirrorPlan.toRemove.length === 0
+                          )}
+                        >
+                          {mirrorRunning
+                            ? `Aplicando... ${mirrorProgress.done}/${mirrorProgress.total}`
+                            : 'Aplicar espelhamento'}
+                        </button>
+                        <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => setMirrorPlan(null)} disabled={mirrorRunning}>
+                          Cancelar
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  {mirrorError && (
+                    <p style={{ color: 'var(--color-error, #e55)', fontSize: 12, marginTop: 6 }}>{mirrorError}</p>
+                  )}
+                  {mirrorResult && !mirrorPlan && (
+                    <p className="text-muted" style={{ fontSize: 12, marginTop: 6 }}>{mirrorResult}</p>
+                  )}
+
+                  {mirrorPlan && (
+                    <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.7 }}>
+                      <div>
+                        <strong>{mirrorPlan.toAdd.length}</strong> a adicionar ·{' '}
+                        <strong>{mirrorPlan.toUpdate.length}</strong> a atualizar ·{' '}
+                        <strong style={{ color: mirrorPlan.toRemove.length ? 'var(--color-error, #e55)' : undefined }}>
+                          {mirrorPlan.toRemove.length}
+                        </strong>{' '}
+                        a remover · {mirrorPlan.unchanged} sem mudança
+                      </div>
+                      {(mirrorPlan.keptExtract > 0 || mirrorPlan.keptOutside > 0) && (
+                        <div className="text-muted">
+                          Preservados sem análise: {mirrorPlan.keptExtract} pacote(s) .zip
+                          {mirrorPlan.keptOutside > 0 && ` · ${mirrorPlan.keptOutside} config(s) fora de BepInEx/config/`}
+                        </div>
+                      )}
+                      {(mirrorPlan.skippedZip.length > 0 || mirrorPlan.skippedEmpty.length > 0 || mirrorPlan.skippedUnknownExt.length > 0) && (
+                        <div className="text-muted">
+                          Fora do espelho: {mirrorPlan.skippedZip.length} .zip solto(s)
+                          {' · '}{mirrorPlan.skippedEmpty.length} vazio(s)
+                          {' · '}{mirrorPlan.skippedUnknownExt.length} extensão não reconhecida
+                          {' '}(nenhum deles é removido do modpack)
+                        </div>
+                      )}
+                      {mirrorPlan.toRemove.length > 0 && (
+                        <details style={{ marginTop: 4 }}>
+                          <summary style={{ cursor: 'pointer' }}>
+                            Ver os {mirrorPlan.toRemove.length} que serão removidos
+                          </summary>
+                          <div style={{ maxHeight: 160, overflowY: 'auto', fontFamily: 'monospace', fontSize: 11, marginTop: 4 }}>
+                            {mirrorPlan.toRemove.map(p => <div key={p}>{p}</div>)}
+                          </div>
+                        </details>
+                      )}
+                      {mirrorPlan.toAdd.length + mirrorPlan.toUpdate.length + mirrorPlan.toRemove.length === 0 && (
+                        <div className="text-muted">O modpack já está igual à pasta — nada a fazer.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {localConfigFiles.length > 0 && (
                 <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>

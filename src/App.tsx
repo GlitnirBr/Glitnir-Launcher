@@ -104,6 +104,11 @@ export default function App() {
         valheimPath: cfg.valheimPath || '',
         installedMods: cfg.installedMods || [],
         installedByProfile: cfg.installedByProfile || {},
+        // OBRIGATÓRIO carregar: é o marcador de "estes configs já foram aplicados neste perfil".
+        // Sem ele o estado em memória nasce vazio, o gate do Jogar compara '' com o hash do
+        // modpack, dá SEMPRE diferente, e todo launch reaplica os configs (e o save flatten
+        // do mapa apagava o hash dos outros mundos).
+        configsHashByProfile: cfg.configsHashByProfile || {},
         optionalModsEnabled: cfg.optionalModsEnabled || {},
         backendUrl,
         modpackRepo: cfg.modpackRepo || '',
@@ -111,6 +116,10 @@ export default function App() {
         newsUrl: cfg.newsUrl || '',
         selectedModpack: selected,
         modsPath: cfg.modsPath,
+        // Pasta de configs do admin: é gravada quando ele escolhe no diálogo, mas sem ser
+        // carregada aqui o editor abria com o campo vazio e ele tinha que escolher a pasta
+        // de novo em toda sessão.
+        adminProfilePath: cfg.adminProfilePath,
       })
       if (selected) setSelectedModpack(selected)
     } catch {
@@ -118,6 +127,7 @@ export default function App() {
         valheimPath: '',
         installedMods: [],
         installedByProfile: {},
+        configsHashByProfile: {},
         optionalModsEnabled: {},
         backendUrl: '',
         modpackRepo: '',
@@ -442,6 +452,34 @@ export default function App() {
         await window.glitnir.mods.remove({ modName: mod.name, profile })
       }
 
+      /**
+       * Estado instalado deste perfil, gravado no disco A CADA mod. Antes ele só era gravado no
+       * FIM de tudo: qualquer falha no meio (a rede caindo no 40º de 53 mods, um zip corrompido)
+       * descartava o progresso inteiro e o próximo launch re-baixava os ~2 GB desde o começo —
+       * o "loop de download" relatado pelos players. Vai pelo IPC direto (não por
+       * handleSaveConfig) porque este só grava; recarregar a config a cada mod re-buscaria o
+       * modpack dezenas de vezes no meio da instalação. O estado do React é sincronizado no fim.
+       *
+       * Sem BepInEx no disco (ou "do zero") nada do que estava registrado vale: tudo é reinstalado
+       * neste passe, então o registro começa VAZIO e só cresce com o que confirmar instalação.
+       */
+      const trustPrevious = bepinexOk && !fromScratch
+      const installedNow = new Map<string, string>()
+      if (trustPrevious) {
+        for (const m of previouslyInstalled) {
+          if (currentModNames.has(m.name)) installedNow.set(m.name, m.version)
+        }
+      }
+      const persistInstalled = async () => {
+        const list = Array.from(installedNow, ([name, version]) => ({ name, version }))
+        try {
+          await window.glitnir.config.save({
+            installedByProfile: { ...(config.installedByProfile || {}), [profile]: list },
+          })
+        } catch { /* falha ao gravar não deve parar a instalação */ }
+      }
+      await persistInstalled()
+
       for (let i = 0; i < toInstall.length; i++) {
         const mod = toInstall[i]
         setInstallStatus(`Baixando ${mod.name}...`)
@@ -469,6 +507,10 @@ export default function App() {
         // (No "do zero" não há nada instalado: a pasta do perfil foi apagada antes.)
         if (!fromScratch && mod.installed) {
           setInstallStatus(`Atualizando ${mod.name}...`)
+          // Desregistra ANTES de apagar: entre o remove e o install o mod não está no disco, e
+          // se o launcher morrer aqui o registro não pode continuar afirmando que ele está lá.
+          installedNow.delete(mod.name)
+          await persistInstalled()
           await window.glitnir.mods.remove({ modName: mod.name, profile })
         }
 
@@ -479,6 +521,10 @@ export default function App() {
           profile,
         })
         if (!inst.success) throw new Error(inst.error || `Falha ao instalar ${mod.name}`)
+
+        // Progresso salvo mod a mod: uma falha no próximo não apaga o que já entrou.
+        installedNow.set(mod.name, mod.version || '0.0.0')
+        await persistInstalled()
       }
 
       // Aplica as configs do modpack de forma INCREMENTAL, numa única IPC. O main pula os
@@ -495,22 +541,37 @@ export default function App() {
         )
         setInstallProgress(90 + Math.round((done / Math.max(total, 1)) * 10))
       })
+      let configsFailed = 0
       try {
         const r = await window.glitnir.mods.applyConfigs({ profile, configs })
         if (r?.error) throw new Error(r.error)
+        configsFailed = r?.failed || 0
       } finally {
         window.glitnir.mods.offApplyConfigProgress()
       }
 
       // Registra os mods instalados desse perfil + o hash dos configs aplicados, para
       // detectar mudanças só de config (sem bump de versão de mod) no próximo launch.
-      const installedList = activeMods.map(m => ({ name: m.name, version: m.version || '0.0.0' }))
+      const installedList = Array.from(installedNow, ([name, version]) => ({ name, version }))
       const installedByProfile = { ...(config.installedByProfile || {}), [profile]: installedList }
-      const configsHashByProfile = { ...(config.configsHashByProfile || {}), [profile]: hashConfigs(configs) }
-      await handleSaveConfig({ installedByProfile, configsHashByProfile })
+      const updates: Partial<Config> = { installedByProfile }
+      // O hash só é gravado quando TODOS os configs entraram. Com falhas (rede/antivírus cortando
+      // alguns downloads do R2), gravá-lo faria o gate do próximo launch considerar os configs em
+      // dia e pular o apply — o player ficaria pra sempre sem esses arquivos.
+      if (!configsFailed) {
+        updates.configsHashByProfile = { ...(config.configsHashByProfile || {}), [profile]: hashConfigs(configs) }
+      }
+      await handleSaveConfig(updates)
 
       setInstallProgress(100)
       setInstallStatus('Concluído!')
+      if (configsFailed) {
+        setLaunchNotice(
+          `${configsFailed} arquivo(s) de configuração não puderam ser baixados agora.\n\n` +
+          'O jogo abre normalmente, mas essas configurações ainda não estão aplicadas. ' +
+          'O launcher tenta de novo automaticamente na próxima vez que você clicar em Jogar.',
+        )
+      }
     } catch (err: any) {
       setInstallStatus(err.message || 'Erro na instalação')
       throw err

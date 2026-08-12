@@ -321,7 +321,10 @@ const allowedFsRoots = new Set<string>()
  * estaria liberado e ações como "Abrir pasta" falhariam.
  */
 function registerConfiguredRoots(config: any) {
-  for (const p of [config?.valheimPath, config?.modsPath]) {
+  // `adminProfilePath` entra junto: ele só existe na config porque o admin JÁ escolheu essa pasta
+  // num diálogo antes. Sem re-liberá-la ao carregar, o caminho lembrado voltava na tela mas
+  // qualquer Listar/ler dava "Acesso negado" até ele escolher a pasta de novo pelo diálogo.
+  for (const p of [config?.valheimPath, config?.modsPath, config?.adminProfilePath]) {
     if (typeof p === 'string' && p) allowedFsRoots.add(path.resolve(p))
   }
 }
@@ -633,27 +636,47 @@ function routeModContents(staging: string, profileRoot: string, modName: string)
  * aninhados lá em vez dos locais corretos do BepInEx. Isso duplica arquivos
  * (ex.: traduções .yml carregadas duas vezes → "Duplicate key ... will be skipped")
  * e pode impedir o jogo de rodar. Move essas subpastas para fora.
+ *
+ * RODA UMA VEZ POR PERFIL (marcador em .glitnir/). Antes rodava na abertura do launcher E em
+ * todo launch modado, e isso quebrava o caso normal: vários mods CRIAM uma pasta `config/`
+ * dentro do próprio plugins/<mod>/ enquanto o jogo roda (assets, texturas, traduções). O launch
+ * seguinte varria essa pasta e despejava o conteúdo solto em BepInEx/config/ — era o
+ * "instalo do zero e fica certo, depois de jogar os arquivos aparecem soltos em config/".
+ * Como o install já roteia config/ do pacote pro lugar certo (routeModContents), depois da
+ * primeira passada não há mais nada legítimo pra migrar: o que aparecer ali é do runtime do mod.
  */
+const NESTED_MIGRATION_STAMP = 'migrated-nested-bepinex-v1'
+
 function migrateNestedBepInExFolders(profileRoot: string): number {
+  const stamp = path.join(profileRoot, '.glitnir', NESTED_MIGRATION_STAMP)
+  if (fs.existsSync(stamp)) return 0
+
   const pluginsRoot = path.join(profileRoot, 'BepInEx', 'plugins')
-  if (!fs.existsSync(pluginsRoot)) return 0
   let moved = 0
-  for (const mod of fs.readdirSync(pluginsRoot)) {
-    const modDir = path.join(pluginsRoot, mod)
-    if (!fs.statSync(modDir).isDirectory()) continue
-    for (const sub of ['config', 'patchers', 'monomod']) {
-      const nested = path.join(modDir, sub)
-      if (fs.existsSync(nested) && fs.statSync(nested).isDirectory()) {
-        copyDirRecursive(nested, path.join(profileRoot, 'BepInEx', sub))
-        fs.rmSync(nested, { recursive: true, force: true })
-        moved++
+  if (fs.existsSync(pluginsRoot)) {
+    for (const mod of fs.readdirSync(pluginsRoot)) {
+      const modDir = path.join(pluginsRoot, mod)
+      if (!fs.statSync(modDir).isDirectory()) continue
+      for (const sub of ['config', 'patchers', 'monomod']) {
+        const nested = path.join(modDir, sub)
+        if (fs.existsSync(nested) && fs.statSync(nested).isDirectory()) {
+          copyDirRecursive(nested, path.join(profileRoot, 'BepInEx', sub))
+          fs.rmSync(nested, { recursive: true, force: true })
+          moved++
+        }
       }
     }
   }
+
+  // Marca mesmo sem ter movido nada: o objetivo é NUNCA varrer de novo os plugins deste perfil.
+  try {
+    fs.mkdirSync(path.dirname(stamp), { recursive: true })
+    fs.writeFileSync(stamp, new Date().toISOString())
+  } catch { /* sem permissão: no pior caso a migração roda de novo no próximo launch */ }
   return moved
 }
 
-/** Roda a migração acima em todos os perfis existentes (idempotente). */
+/** Roda a migração acima em todos os perfis existentes (uma vez por perfil, via marcador). */
 function migrateAllProfiles() {
   try {
     const root = getProfilesRoot()
@@ -706,13 +729,25 @@ function profileDir(profile: string): string {
 function ensureDirs(profile?: string) {
   const root = getProfilesRoot()
   const dirs = [DATA_PATH, root]
+  let freshProfile: string | null = null
   if (profile) {
     const p = profileDir(profile)
+    // Perfil que está sendo CRIADO agora não tem nada de instalação antiga para migrar: já nasce
+    // com o roteamento correto do install. Marcá-lo aqui evita que a varredura de plugins/ rode
+    // nele e leve embora as pastas `config/` que os mods criam em runtime.
+    if (!fs.existsSync(p)) freshProfile = p
     dirs.push(p, path.join(p, 'BepInEx', 'plugins'), path.join(p, 'BepInEx', 'config'))
   }
   dirs.forEach(p => {
     if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true })
   })
+  if (freshProfile) {
+    try {
+      const stamp = path.join(freshProfile, '.glitnir', NESTED_MIGRATION_STAMP)
+      fs.mkdirSync(path.dirname(stamp), { recursive: true })
+      fs.writeFileSync(stamp, new Date().toISOString())
+    } catch { /* best-effort: sem o marcador a migração roda uma vez e marca depois */ }
+  }
 }
 
 // ── Aplicação de configs (incremental) ─────────────────────────────────────────────
@@ -747,8 +782,24 @@ async function writeConfigToDisk(target: string, content: string): Promise<void>
   const trimmed = (content || '').trim()
   if (/^https?:\/\//i.test(trimmed)) {
     const axios = require('axios')
-    const res = await axios.get(trimmed, { responseType: 'arraybuffer', timeout: 30000, maxRedirects: 5 })
-    fs.writeFileSync(target, Buffer.from(res.data))
+    // Retry com backoff, igual ao download de mod: são centenas de configs por perfil e uma
+    // falha transitória (TLS interceptado por antivírus, socket morto, 503 da borda) deixava o
+    // config de fora — e como o registro não marca o que falhou, o player repetia o download
+    // desses mesmos arquivos em TODO launch. Erro definitivo (404) sai na primeira.
+    const MAX_ATTEMPTS = 3
+    let lastErr: any
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const res = await axios.get(trimmed, { responseType: 'arraybuffer', timeout: 60000, maxRedirects: 5 })
+        fs.writeFileSync(target, Buffer.from(res.data))
+        return
+      } catch (err: any) {
+        lastErr = err
+        if (!isNetworkishError(err)) break
+        if (attempt < MAX_ATTEMPTS) await sleep(attempt * 1000) // 1s, 2s
+      }
+    }
+    throw lastErr
   } else {
     fs.writeFileSync(target, content)
   }
@@ -1646,7 +1697,12 @@ app.whenReady().then(() => {
       const applied = readAppliedConfigs(profile)
       const wanted = new Set<string>()
       let done = 0, appliedCount = 0, skipped = 0
+      // `failed` = falha TRANSITÓRIA (download/gravação): vale tentar de novo, e é o que faz o
+      // renderer não marcar os configs como aplicados. `invalid` = entrada quebrada no modpack
+      // (installPath fora do perfil, url de pacote inválida): nenhuma nova tentativa resolve, então
+      // não pode bloquear o marcador — senão o launcher reaplicaria tudo em TODO launch pra sempre.
       const failed: string[] = []
+      const invalid: string[] = []
 
       // Separa o que precisa aplicar (hash mudou OU arquivo sumiu — auto-cura remoções manuais)
       // do que pode ser pulado. Já contabiliza os pulados no progresso.
@@ -1654,7 +1710,7 @@ app.whenReady().then(() => {
       for (const c of list) {
         wanted.add(c.installPath)
         const target = resolveConfigTarget(profile, c.installPath)
-        if (!target) { failed.push(c.installPath); done++; continue }
+        if (!target) { invalid.push(c.installPath); done++; continue }
         const hash = hashConfigEntry(c.installPath, c.content)
         if (applied[c.installPath] === hash && fs.existsSync(target)) {
           skipped++; done++; continue
@@ -1700,7 +1756,7 @@ app.whenReady().then(() => {
         const destDir = resolveConfigTarget(profile, pack.installPath || 'BepInEx/config')
         const url = (pack.content || '').trim()
         if (!destDir || !/^https?:\/\//i.test(url)) {
-          failed.push(pack.filename || pack.installPath); done++
+          invalid.push(pack.filename || pack.installPath); done++
           try { win.webContents.send('mods:applyConfigProgress', { done, total, filename: pack.filename || pack.installPath }) } catch { /* janela fechou */ }
           continue
         }
@@ -1751,7 +1807,15 @@ app.whenReady().then(() => {
       }
       if (zipsChanged) writeAppliedZips(profile, zipsApplied)
 
-      return { success: true, total, applied: appliedCount, skipped, failed: failed.length }
+      // Log das falhas: sem isto, "configs demorando/faltando" na máquina de um player não tem
+      // como ser diagnosticado remotamente — só aparece o contador na UI.
+      if (failed.length || invalid.length) {
+        logDownloadIssue(
+          `applyConfigs(${profile}): ${failed.length} falha(s) de download, ${invalid.length} entrada(s) inválida(s)` +
+          ` — ${[...failed, ...invalid].slice(0, 20).join(', ')}`,
+        )
+      }
+      return { success: true, total, applied: appliedCount, skipped, failed: failed.length, invalid: invalid.length }
     } catch (err: any) {
       return { success: false, error: err.message }
     }
@@ -2269,6 +2333,44 @@ app.whenReady().then(() => {
     }
   })
 
+  /**
+   * Libera uma pasta ARRASTADA para dentro da janela como raiz de leitura desta sessão —
+   * o equivalente do fs:pickDir para quem prefere arrastar a pasta `config` em vez de
+   * navegar no diálogo.
+   *
+   * Diferença de confiança em relação ao diálogo: lá o gesto acontece numa janela do SO, que
+   * o renderer não consegue fabricar; aqui o gesto acontece no renderer, então o main não tem
+   * como comprová-lo. Por isso o que pode ser liberado é ESTREITO: precisa existir, ser pasta,
+   * e chamar-se `config` (é sempre `BepInEx/config`). Isso impede que uma chamada indevida
+   * libere `C:\` ou a pasta do usuário, e de bônus barra o erro comum de arrastar a pasta
+   * `BepInEx` (que faria todo config virar `BepInEx/config/config/...`). Para qualquer outro
+   * nome de pasta, o diálogo continua sendo o caminho.
+   */
+  ipcMain.handle('fs:allowDroppedConfigDir', async (_e, { dirPath }: { dirPath: string }) => {
+    try {
+      if (typeof dirPath !== 'string' || !dirPath.trim()) {
+        return { success: false, error: 'Caminho inválido' }
+      }
+      const resolved = path.resolve(dirPath)
+      let stat: fs.Stats
+      try { stat = fs.statSync(resolved) } catch { return { success: false, error: 'Pasta não encontrada' } }
+      if (!stat.isDirectory()) {
+        return { success: false, error: 'Arraste a PASTA config, não um arquivo.' }
+      }
+      if (path.basename(resolved).toLowerCase() !== 'config') {
+        return {
+          success: false,
+          error: `Arraste a pasta chamada "config" (a que fica dentro de BepInEx) — você arrastou "${path.basename(resolved)}". ` +
+            'Para outra pasta, use o botão Buscar.',
+        }
+      }
+      allowedFsRoots.add(resolved)
+      return { success: true, dirPath: resolved }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
   ipcMain.handle('fs:listDir', async (_e, { dir }: { dir: string }) => {
     try {
       if (!isPathAllowed(dir)) return { success: false, error: 'Acesso negado a esta pasta' }
@@ -2287,6 +2389,11 @@ app.whenReady().then(() => {
       const CONFIG_RE =
         /\.(cfg|json|yaml|yml|ini|toml|txt|png|jpe?g|gif|webp|bmp|ico|tga|dds|mp3|ogg|wav|flac|aac|m4a|mp4|webm|mov|mkv|ttf|otf|woff2?|zip|dll|bin|dat|pdf|unity3d|assetbundle|bundle)$/i
       const files: string[] = []
+      // Arquivos que existem na pasta mas cuja extensão não é reconhecida como config.
+      // Vão separados (não somem em silêncio): o espelhamento precisa saber que eles EXISTEM
+      // no disco pra não remover a entrada correspondente do modpack, e o admin precisa ver
+      // que ficaram de fora.
+      const unknown: string[] = []
       const walk = (current: string, rel: string) => {
         for (const name of fs.readdirSync(current)) {
           const abs = path.join(current, name)
@@ -2295,11 +2402,13 @@ app.whenReady().then(() => {
           try { stat = fs.statSync(abs) } catch { continue }
           if (stat.isDirectory()) walk(abs, relPath)
           else if (CONFIG_RE.test(name)) files.push(relPath)
+          else unknown.push(relPath)
         }
       }
       walk(dir, '')
       files.sort()
-      return { success: true, files }
+      unknown.sort()
+      return { success: true, files, unknown }
     } catch (err: any) {
       return { success: false, error: err.message }
     }
@@ -2323,6 +2432,30 @@ app.whenReady().then(() => {
       if (!isPathAllowed(filePath)) return { success: false, error: 'Acesso negado a este arquivo' }
       const content = fs.readFileSync(filePath).toString('base64')
       return { success: true, content }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  /**
+   * sha256 + tamanho de um arquivo do disco, em streaming (não carrega os bytes na memória
+   * nem os manda pro renderer). Serve para o espelhamento de pasta decidir se um config
+   * BINÁRIO mudou: a key do R2 é content-addressed (`{sha8}-{nome}`), então basta comparar
+   * o hash local com o que já está na URL do modpack — sem isso, espelhar reenviaria
+   * centenas de imagens/músicas ao R2 a cada vez.
+   */
+  ipcMain.handle('fs:hashFile', async (_e, { filePath }: { filePath: string }) => {
+    try {
+      if (!isPathAllowed(filePath)) return { success: false, error: 'Acesso negado a este arquivo' }
+      const size = fs.statSync(filePath).size
+      const sha256 = await new Promise<string>((resolve, reject) => {
+        const h = crypto.createHash('sha256')
+        const rs = fs.createReadStream(filePath)
+        rs.on('data', chunk => h.update(chunk))
+        rs.on('error', reject)
+        rs.on('end', () => resolve(h.digest('hex')))
+      })
+      return { success: true, sha256, size }
     } catch (err: any) {
       return { success: false, error: err.message }
     }

@@ -182,7 +182,8 @@ declare global {
         removeProfile: (profile: string) => Promise<{ success: boolean; path?: string; error?: string }>
         setOptionalEnabled: (args: { profile: string; modName: string; enabled: boolean; version?: string }) => Promise<{ success: boolean; moved?: boolean; version?: string; error?: string }>
         applyConfig: (args: { profile: string; installPath: string; content: string }) => Promise<{ success: boolean; error?: string }>
-        applyConfigs: (args: { profile: string; configs: { installPath: string; content: string; filename?: string; extract?: boolean }[] }) => Promise<{ success: boolean; total?: number; applied?: number; skipped?: number; failed?: number; error?: string }>
+        /** `failed` = falha transitória (vale retentar); `invalid` = entrada quebrada no modpack (retentar não resolve). */
+        applyConfigs: (args: { profile: string; configs: { installPath: string; content: string; filename?: string; extract?: boolean }[] }) => Promise<{ success: boolean; total?: number; applied?: number; skipped?: number; failed?: number; invalid?: number; error?: string }>
         /** `stage: 'zip'` = começou o download de um pacote .zip (pode demorar; ver ModConfig.extract). */
         onApplyConfigProgress: (callback: (data: { done: number; total: number; filename: string; stage?: 'zip' }) => void) => void
         offApplyConfigProgress: () => void
@@ -217,9 +218,14 @@ declare global {
         pickDir: () => Promise<string | null>
         openInExplorer: (args: { dirPath: string }) => Promise<{ success: boolean; error?: string }>
         pickImage: () => Promise<{ filename: string; content: string; size: number } | null>
-        listDir: (args: { dir: string }) => Promise<{ success: boolean; files?: string[]; error?: string }>
+        /** `files` = extensões reconhecidas como config; `unknown` = demais arquivos da pasta (não somem em silêncio). */
+        listDir: (args: { dir: string }) => Promise<{ success: boolean; files?: string[]; unknown?: string[]; error?: string }>
         readFile: (args: { filePath: string }) => Promise<{ success: boolean; content?: string; error?: string }>
         readFileBase64: (args: { filePath: string }) => Promise<{ success: boolean; content?: string; error?: string }>
+        /** sha256 + tamanho lidos em streaming no main; usado pra saber se um binário mudou sem reenviá-lo. */
+        hashFile: (args: { filePath: string }) => Promise<{ success: boolean; sha256?: string; size?: number; error?: string }>
+        /** Libera uma pasta `config` arrastada na janela como raiz de leitura da sessão (só aceita pasta com esse nome). */
+        allowDroppedConfigDir: (args: { dirPath: string }) => Promise<{ success: boolean; dirPath?: string; error?: string }>
         writeFile: (args: { filePath: string; content: string }) => Promise<{ success: boolean; error?: string }>
         pickJsonFile: () => Promise<string | null>
         saveFileDialog: (args: { filename: string; content: string }) => Promise<{ success: boolean }>
