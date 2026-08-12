@@ -118,6 +118,39 @@ function logDownloadIssue(line: string): void {
 }
 
 /**
+ * Log do ciclo de vida do auto-updater, no MESMO arquivo dos downloads (é o log que se pede ao
+ * player). Sem ele, "o launcher não pediu pra atualizar" não tem como ser respondido: não dava
+ * pra saber se a checagem rodou, se achou versão, se falhou ou se o updater estava desligado.
+ */
+function logUpdater(line: string): void {
+  logDownloadIssue(`[updater] ${line}`)
+}
+
+/**
+ * Erro do updater em linguagem de player. Os casos que aparecem na prática são: sem rede/DNS,
+ * TLS interceptado por antivírus e instalação que precisa de elevação (app em Program Files
+ * instalado por uma versão antiga, onde o update silencioso não consegue escrever).
+ */
+function friendlyUpdaterError(err: any): string {
+  const raw = String(err?.message || err || '')
+  if (isCertTrustError(err) || /BAD_DECRYPT|unable to verify|self.signed/i.test(raw)) {
+    return 'A conexão com o servidor de atualizações foi bloqueada (normalmente antivírus ou VPN inspecionando HTTPS). ' +
+      'Desative a inspeção de HTTPS/SSL do antivírus e tente de novo.'
+  }
+  if (isDnsError(err)) {
+    return 'Não foi possível resolver o endereço do servidor de atualizações. Verifique sua conexão/DNS.'
+  }
+  if (/EPERM|EACCES|elevat|permission/i.test(raw)) {
+    return 'A atualização não conseguiu escrever na pasta de instalação. Reinstale o launcher usando o instalador mais recente ' +
+      '(instale só para o seu usuário, não em Program Files).'
+  }
+  if (/404|no published versions|latest.yml/i.test(raw)) {
+    return 'O servidor de atualizações não devolveu uma versão publicada. Se a release acabou de sair, aguarde alguns minutos.'
+  }
+  return raw || 'Falha desconhecida ao verificar atualizações.'
+}
+
+/**
  * Converte o erro cru de um download numa mensagem que o jogador entende e consegue agir.
  * Sem isso, uma falha de TLS aparecia como o despejo do OpenSSL (`error:...BAD_DECRYPT: e_aes.c`),
  * que assusta e não diz o que fazer. Cada causa tem uma ação diferente — antes tudo virava
@@ -1219,12 +1252,33 @@ app.whenReady().then(() => {
   // erro em toda abertura; nesse caso a atualização é pelo gerenciador de pacotes/download novo.
   const updaterSupported = process.platform !== 'linux' || !!process.env.APPIMAGE
 
+  /**
+   * Último status do updater. Existe porque `webContents.send` NÃO enfileira: a checagem começa
+   * 3s depois do app pronto e pode terminar antes do React montar e registrar o listener — aí o
+   * evento se perde e a barra nunca aparece, sem nenhum sinal de que algo aconteceu. O renderer
+   * lê este estado ao montar (`updater:getStatus`) e recupera o que perdeu.
+   */
+  let lastUpdaterStatus: { status: string; message?: string; version?: string } | null = null
+
+  function sendUpdaterStatus(payload: { status: string; message?: string; version?: string }) {
+    lastUpdaterStatus = payload
+    logUpdater(`status=${payload.status}${payload.version ? ` version=${payload.version}` : ''}${payload.message ? ` — ${payload.message}` : ''}`)
+    try { win.webContents.send('updater:status', payload) } catch { /* janela fechou */ }
+  }
+
   if (app.isPackaged && updaterSupported) {
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
 
-    autoUpdater.on('update-available', () => {
-      win.webContents.send('updater:status', { status: 'available' })
+    autoUpdater.on('update-available', (info) => {
+      sendUpdaterStatus({ status: 'available', version: info?.version })
+    })
+
+    // Sem este evento não havia como dizer "você já está na última versão": quando não há
+    // atualização o electron-updater não emite mais nada, e a ausência de barra era idêntica
+    // a uma checagem que falhou ou a um evento perdido.
+    autoUpdater.on('update-not-available', (info) => {
+      sendUpdaterStatus({ status: 'not-available', version: info?.version })
     })
 
     autoUpdater.on('download-progress', (info) => {
@@ -1235,22 +1289,49 @@ app.whenReady().then(() => {
       })
     })
 
-    autoUpdater.on('update-downloaded', () => {
-      win.webContents.send('updater:status', { status: 'downloaded' })
+    autoUpdater.on('update-downloaded', (info) => {
+      sendUpdaterStatus({ status: 'downloaded', version: info?.version })
     })
 
     autoUpdater.on('error', (err) => {
       console.error('Auto-updater error:', err)
-      win.webContents.send('updater:status', { status: 'error', message: err.message })
+      sendUpdaterStatus({ status: 'error', message: err.message })
     })
 
+    logUpdater(`app ${app.getVersion()} — checagem automática agendada (plataforma ${process.platform})`)
     setTimeout(() => {
-      autoUpdater.checkForUpdates().catch(() => {})
+      autoUpdater.checkForUpdates().catch(err => logUpdater(`checkForUpdates falhou: ${describeDownloadError(err)}`))
     }, 3000)
+  } else {
+    logUpdater(`updater inativo: packaged=${app.isPackaged} supported=${updaterSupported} (app ${app.getVersion()})`)
   }
 
-  ipcMain.handle('updater:check', () => {
-    if (app.isPackaged && updaterSupported) autoUpdater.checkForUpdates().catch(() => {})
+  /** Estado do app para a tela Sobre: versão instalada e se o updater pode rodar aqui. */
+  ipcMain.handle('app:info', () => ({
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    updaterSupported,
+    platform: process.platform,
+  }))
+
+  /** Último status conhecido, para o renderer não perder o que foi emitido antes de montar. */
+  ipcMain.handle('updater:getStatus', () => lastUpdaterStatus)
+
+  /**
+   * Checagem manual. Diferente da automática, RESPONDE o resultado — sem isso um clique em
+   * "Verificar atualizações" que não encontra nada (ou que falha) não dava retorno nenhum.
+   */
+  ipcMain.handle('updater:check', async () => {
+    const version = app.getVersion()
+    if (!app.isPackaged) return { success: false, reason: 'dev', version }
+    if (!updaterSupported) return { success: false, reason: 'unsupported', version }
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      return { success: true, version, latestVersion: result?.updateInfo?.version }
+    } catch (err: any) {
+      logUpdater(`checagem manual falhou: ${describeDownloadError(err)}`)
+      return { success: false, reason: 'error', error: friendlyUpdaterError(err), version }
+    }
   })
 
   ipcMain.handle('updater:install', () => {

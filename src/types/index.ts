@@ -46,6 +46,16 @@ export interface Mod {
   optionalDisabled?: boolean
 }
 
+/**
+ * Status do auto-updater. `not-available` = a checagem rodou e você já está na última versão —
+ * é o caso que antes não emitia nada, deixando "atualizado", "falhou" e "evento perdido" iguais.
+ */
+export interface UpdaterStatus {
+  status: 'available' | 'not-available' | 'downloaded' | 'error'
+  message?: string
+  version?: string
+}
+
 export interface ModConfig {
   /** Nome do mod ao qual a config pertence (informativo) */
   mod: string
@@ -236,10 +246,23 @@ declare global {
       server: {
         status: (args: { address: string; timeoutMs?: number }) => Promise<ServerStatus>
       }
+      app: {
+        /** Versão INSTALADA do launcher (app.getVersion) + se o auto-update roda neste ambiente. */
+        info: () => Promise<{ version: string; packaged: boolean; updaterSupported: boolean; platform: string }>
+      }
       updater: {
-        check: () => Promise<void>
+        /** Checagem manual: responde o resultado (`reason: 'dev' | 'unsupported' | 'error'` quando não roda). */
+        check: () => Promise<{
+          success: boolean
+          version: string
+          latestVersion?: string
+          reason?: 'dev' | 'unsupported' | 'error'
+          error?: string
+        }>
         install: () => Promise<void>
-        onStatus: (callback: (data: { status: string }) => void) => void
+        /** Último status emitido, para o caso de a checagem ter terminado antes do React montar. */
+        getStatus: () => Promise<UpdaterStatus | null>
+        onStatus: (callback: (data: UpdaterStatus) => void) => void
         onProgress: (callback: (data: { percent: number; transferred: number; total: number }) => void) => void
       }
     }

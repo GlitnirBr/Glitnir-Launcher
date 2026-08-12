@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Modpack } from '../types'
 import { DISCORD_URL, WEBSITE_URL } from '../constants/links'
 import './AboutView.css'
@@ -14,6 +15,46 @@ const RULES = [
 ]
 
 export default function AboutView({ modpack }: Props) {
+  /**
+   * Versão INSTALADA do launcher + checagem manual de atualização. Antes não havia nada disso na
+   * interface: a única "Versão" visível era a do modpack, então não dava para saber em que versão
+   * o launcher estava, nem distinguir "já estou atualizado" de "a checagem falhou em silêncio".
+   */
+  const [appInfo, setAppInfo] = useState<{ version: string; packaged: boolean; updaterSupported: boolean } | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [checkResult, setCheckResult] = useState('')
+
+  useEffect(() => {
+    window.glitnir.app.info().then(setAppInfo).catch(() => {})
+  }, [])
+
+  async function handleCheckUpdate() {
+    setChecking(true)
+    setCheckResult('')
+    try {
+      const r = await window.glitnir.updater.check()
+      if (r.success) {
+        // `latestVersion` é a versão publicada; se for igual à instalada, está em dia. Quando há
+        // atualização, o download já começou e a barra de atualização assume daqui.
+        setCheckResult(
+          r.latestVersion && r.latestVersion !== r.version
+            ? `Atualização ${r.latestVersion} encontrada — o download começou.`
+            : `Você já está na versão mais recente (${r.version}).`,
+        )
+      } else if (r.reason === 'dev') {
+        setCheckResult('Atualização automática só funciona na versão instalada (build empacotado).')
+      } else if (r.reason === 'unsupported') {
+        setCheckResult('Esta instalação não recebe atualização automática (no Linux, apenas o AppImage). Baixe a versão nova manualmente.')
+      } else {
+        setCheckResult(r.error || 'Não foi possível verificar atualizações.')
+      }
+    } catch (err: any) {
+      setCheckResult(err?.message || 'Não foi possível verificar atualizações.')
+    } finally {
+      setChecking(false)
+    }
+  }
+
   return (
     <div className="about-view">
       <div className="about-header">
@@ -56,10 +97,25 @@ export default function AboutView({ modpack }: Props) {
           </div>
           {modpack?.version && (
             <div className="about-info-row">
-              <span className="about-info-label">Versão</span>
+              <span className="about-info-label">Versão do modpack</span>
               <span className="about-info-value">{modpack.version}</span>
             </div>
           )}
+          <div className="about-info-row">
+            <span className="about-info-label">Versão do launcher</span>
+            <span className="about-info-value">
+              {appInfo ? appInfo.version : '...'}
+              {appInfo && !appInfo.packaged && ' (dev)'}
+            </span>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <button className="btn-secondary" onClick={handleCheckUpdate} disabled={checking}>
+              {checking ? 'Verificando...' : 'Verificar atualizações'}
+            </button>
+            {checkResult && (
+              <p className="text-secondary" style={{ fontSize: 13, marginTop: 8, marginBottom: 0 }}>{checkResult}</p>
+            )}
+          </div>
         </div>
       </div>
 

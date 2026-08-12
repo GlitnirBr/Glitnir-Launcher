@@ -114,9 +114,15 @@ contextBridge.exposeInMainWorld('glitnir', {
       ipcRenderer.invoke('server:status', args),
   },
 
+  app: {
+    info: () => ipcRenderer.invoke('app:info'),
+  },
+
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
     install: () => ipcRenderer.invoke('updater:install'),
+    // Status já emitido antes do renderer montar (o send do main não enfileira).
+    getStatus: () => ipcRenderer.invoke('updater:getStatus'),
     onStatus: (callback: (data: { status: string }) => void) => {
       const handler = (_e: Electron.IpcRendererEvent, data: { status: string }) => callback(data)
       ipcRenderer.removeAllListeners('updater:status')

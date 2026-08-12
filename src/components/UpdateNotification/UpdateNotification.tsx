@@ -9,13 +9,15 @@ function formatBytes(bytes: number): string {
 export default function UpdateNotification() {
   const [status, setStatus] = useState<'available' | 'downloaded' | 'error' | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [newVersion, setNewVersion] = useState('')
   const [progress, setProgress] = useState<{ percent: number; transferred: number; total: number } | null>(null)
   const [slowTimeout, setSlowTimeout] = useState(false)
 
   useEffect(() => {
     let slowTimer: ReturnType<typeof setTimeout> | null = null
 
-    function handleStatus(data: { status: string }) {
+    function handleStatus(data: { status: string; message?: string; version?: string }) {
+      if (data.version) setNewVersion(data.version)
       if (data.status === 'available') {
         setStatus('available')
         slowTimer = setTimeout(() => setSlowTimeout(true), 10000)
@@ -24,9 +26,11 @@ export default function UpdateNotification() {
         if (slowTimer) clearTimeout(slowTimer)
       } else if (data.status === 'error') {
         setStatus('error')
-        setErrorMsg((data as any).message || 'Erro desconhecido')
+        setErrorMsg(data.message || 'Erro desconhecido')
         if (slowTimer) clearTimeout(slowTimer)
       }
+      // `not-available` não vira barra: aparecer "você está atualizado" em toda abertura seria
+      // ruído. Quem mostra esse caso é a checagem manual, na tela Sobre.
     }
 
     function handleProgress(data: { percent: number; transferred: number; total: number }) {
@@ -36,6 +40,10 @@ export default function UpdateNotification() {
 
     window.glitnir.updater.onStatus(handleStatus)
     window.glitnir.updater.onProgress(handleProgress)
+
+    // A checagem automática começa 3s após o app abrir e pode terminar ANTES deste componente
+    // montar; o send do main não enfileira, então sem isto a barra simplesmente nunca aparecia.
+    window.glitnir.updater.getStatus().then(last => { if (last) handleStatus(last) }).catch(() => {})
 
     return () => {
       if (slowTimer) clearTimeout(slowTimer)
@@ -85,7 +93,9 @@ export default function UpdateNotification() {
 
         {status === 'downloaded' && (
           <>
-            <span className="update-bar-label">Atualização pronta!</span>
+            <span className="update-bar-label">
+              {newVersion ? `Atualização ${newVersion} pronta!` : 'Atualização pronta!'}
+            </span>
             <span className="update-bar-desc">Reinicie para aplicar.</span>
           </>
         )}
