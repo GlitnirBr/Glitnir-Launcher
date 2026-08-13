@@ -44,15 +44,19 @@ jobs:
         shell: bash
         run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
 
-      # O postinstall do electron baixa o binário (~90 MB) do GitHub. Com o cache quente esse
-      # download nem acontece — que é a melhor defesa contra o "socket hang up" que já derrubou
-      # a release. A key segue o package-lock: mudou a versão do electron, baixa de novo.
-      - name: Cache do binário do Electron
+      # Dois downloads distintos do mesmo binário (~90 MB), com caches separados:
+      #   .cache/electron         → postinstall do pacote npm `electron` (@electron/get)
+      #   .cache/electron-builder → app-builder, no empacotamento (ELECTRON_BUILDER_CACHE)
+      # Com os dois quentes o download nem acontece — melhor defesa contra o "socket hang up"/EOF
+      # que já derrubou a release. A key segue o package-lock: mudou o electron, baixa de novo.
+      - name: Cache dos binários do Electron
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/.cache/electron
-          key: electron-${{ matrix.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: electron-${{ matrix.os }}-
+          path: |
+            ${{ github.workspace }}/.cache/electron
+            ${{ github.workspace }}/.cache/electron-builder
+          key: electron-v2-${{ matrix.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-v2-${{ matrix.os }}-
 
       # Retry explícito: o @electron/get NÃO retenta, então uma falha de rede transitória
       # (socket hang up no meio do zip) reprova o job todo. `npm ci` apaga node_modules antes,
@@ -72,8 +76,24 @@ jobs:
           echo "::error::npm ci falhou nas 3 tentativas"
           exit 1
 
+      # Mesmo problema do npm ci, um passo adiante: o app-builder baixa o zip do electron aqui e
+      # também não retenta sozinho (falha com EOF no meio do download e reprova o job). Retry
+      # explícito; se o download já tiver ido, a tentativa seguinte pega do cache e é rápida.
       - name: Build
-        run: npm run build -- --publish never
+        shell: bash
+        env:
+          ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+          ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+        run: |
+          for i in 1 2 3; do
+            npm run build -- --publish never && exit 0
+            if [ "$i" -lt 3 ]; then
+              echo "::warning::build falhou (tentativa $i/3) — nova tentativa em $((i * 20))s"
+              sleep $((i * 20))
+            fi
+          done
+          echo "::error::build falhou nas 3 tentativas"
+          exit 1
 
       - name: Subir artefatos do build
         uses: actions/upload-artifact@v4

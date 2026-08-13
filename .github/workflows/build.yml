@@ -32,14 +32,17 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      # Mesmo esquema do release.yml: cache do binário do electron + retry no npm ci, porque o
-      # postinstall dele baixa ~90 MB do GitHub e o @electron/get não retenta sozinho.
-      - name: Cache do binário do Electron
+      # Mesmo esquema do release.yml: cache dos dois downloads do binário do electron (postinstall
+      # do npm e app-builder no empacotamento) + retry no npm ci e no build, porque nenhum dos
+      # dois retenta sozinho e cada um baixa ~90 MB do GitHub.
+      - name: Cache dos binários do Electron
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/.cache/electron
-          key: electron-${{ matrix.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: electron-${{ matrix.os }}-
+          path: |
+            ${{ github.workspace }}/.cache/electron
+            ${{ github.workspace }}/.cache/electron-builder
+          key: electron-v2-${{ matrix.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-v2-${{ matrix.os }}-
 
       - name: Install dependencies
         shell: bash
@@ -57,7 +60,20 @@ jobs:
           exit 1
 
       - name: Build app
-        run: npm run build -- --publish never
+        shell: bash
+        env:
+          ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+          ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+        run: |
+          for i in 1 2 3; do
+            npm run build -- --publish never && exit 0
+            if [ "$i" -lt 3 ]; then
+              echo "::warning::build falhou (tentativa $i/3) — nova tentativa em $((i * 20))s"
+              sleep $((i * 20))
+            fi
+          done
+          echo "::error::build falhou nas 3 tentativas"
+          exit 1
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
